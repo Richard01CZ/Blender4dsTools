@@ -8,8 +8,8 @@ from bpy_extras.io_utils import ImportHelper, ExportHelper # type: ignore
 from bpy.props import StringProperty, EnumProperty, IntProperty, FloatProperty, FloatVectorProperty, BoolProperty # type: ignore
 bl_info = {
     "name": "LS3D 4DS Importer/Exporter",
-    "author": "Sev3n, Grok 3 (xAI)",
-    "version": (1, 1),
+    "author": "Sev3n, Richard01_CZ, Grok 3 AI, Google Gemini 3 Pro Preview, ChatGPT 5.2",
+    "version": (0, 0, 1, 'preview' ),
     "blender": (5, 0, 1),
     "location": "File > Import/Export > 4DS Model File",
     "description": "Import and export LS3D .4ds files (Mafia)",
@@ -19,7 +19,8 @@ bl_info = {
 VERSION_MAFIA = 29
 VERSION_HD2 = 41
 VERSION_CHAMELEON = 42
-# FrameType consts
+
+# Frame Types
 FRAME_VISUAL = 1
 FRAME_LIGHT = 2
 FRAME_CAMERA = 3
@@ -35,7 +36,8 @@ FRAME_OCCLUDER = 12
 FRAME_SCENE = 13
 FRAME_AREA = 14
 FRAME_LANDSCAPE = 15
-# VisualType consts
+
+# Visual Types
 VISUAL_OBJECT = 0
 VISUAL_LITOBJECT = 1
 VISUAL_SINGLEMESH = 2
@@ -48,27 +50,38 @@ VISUAL_MIRROR = 8
 VISUAL_EMITOR = 9
 VISUAL_SHADOW = 10
 VISUAL_LANDPATCH = 11
-# Material flags
-MTL_DIFFUSETEX = 0x00040000
-MTL_COLORED = 0x08000000
-MTL_MIPMAP = 0x00800000
-MTL_ANIMTEXDIFF = 0x04000000
-MTL_ANIMTEXALPHA = 0x02000000
-MTL_DOUBLESIDED = 0x10000000
-MTL_ENVMAP = 0x00080000
-MTL_NORMTEXBLEND = 0x00000100
-MTL_MULTIPLYTEXBLEND = 0x00000200
-MTL_ADDTEXBLEND = 0x00000400
-MTL_CALCREFLECTTEXY = 0x00001000
-MTL_PROJECTREFLECTTEXY = 0x00002000
-MTL_PROJECTREFLECTTEXZ = 0x00004000
-MTL_ADDEFFECT = 0x00008000
-MTL_ALPHATEX = 0x40000000
-MTL_COLORKEY = 0x20000000
-MTL_ADDITIVEMIX = 0x80000000
-MTL_UNLIT = 0x00000001
+
+# Material Flags (Full 32-bit map)
+MTL_MISC_UNLIT            = 0x00000001 # Bit 0
+MTL_ENV_OVERLAY           = 0x00000100 # Bit 8
+MTL_ENV_MULTIPLY          = 0x00000200 # Bit 9
+MTL_ENV_ADDITIVE          = 0x00000400 # Bit 10
+MTL_ENV_DISABLE_TEX       = 0x00000800 # Bit 11
+MTL_ENV_PROJECT_Y         = 0x00001000 # Bit 12
+MTL_ENV_DETERMINED_Y      = 0x00002000 # Bit 13
+MTL_ENV_DETERMINED_Z      = 0x00004000 # Bit 14
+MTL_ENV_ADDEFFECT         = 0x00008000 # Bit 15
+
+# High Word Flags (Standard)
+MTL_DISABLE_U_TILING      = 0x00010000 # Bit 16
+MTL_DISABLE_V_TILING      = 0x00020000 # Bit 17
+MTL_DIFFUSETEX            = 0x00040000 # Bit 18
+MTL_ENVMAP                = 0x00080000 # Bit 19
+MTL_CALCREFLECTTEXY       = 0x00100000 # Bit 20 (Wet Roads)
+MTL_PROJECTREFLECTTEXY    = 0x00200000 # Bit 21
+MTL_PROJECTREFLECTTEXZ    = 0x00400000 # Bit 22
+MTL_MIPMAP                = 0x00800000 # Bit 23
+MTL_ALPHA_IN_TEX          = 0x01000000 # Bit 24 (Image Alpha)
+MTL_ANIMATED_ALPHA        = 0x02000000 # Bit 25
+MTL_ANIMATED_DIFFUSE      = 0x04000000 # Bit 26
+MTL_COLORED               = 0x08000000 # Bit 27 (Vertex Color)
+MTL_DOUBLESIDED           = 0x10000000 # Bit 28
+MTL_COLORKEY              = 0x20000000 # Bit 29
+MTL_ALPHA                 = 0x40000000 # Bit 30
+MTL_ADDITIVE              = 0x80000000 # Bit 31
+
 class The4DSPanel(bpy.types.Panel):
-    bl_label = "4DS Properties"
+    bl_label = "4DS Object Properties"
     bl_idname = "OBJECT_PT_4ds"
     bl_space_type = 'PROPERTIES'
     bl_region_type = 'WINDOW'
@@ -77,86 +90,104 @@ class The4DSPanel(bpy.types.Panel):
     def draw(self, context):
         obj = context.object
         layout = self.layout
+        if not obj: return
+
+        if obj.type == 'MESH':
+            layout.prop(obj, "visual_type", text="Mesh Type")
+        layout.separator()
         
-        if obj:
-            if obj.type == 'MESH':
-                layout.prop(obj, "visual_type", text="Mesh Type")
-            
-            layout.separator()
-            
-            # --- MAIN FLAGS ---
+        # --- RENDER FLAGS ---
+        if obj.type == 'MESH':
             box = layout.box()
-            box.label(text="4ds Object Parameters", icon='PREFERENCES')
+            box.label(text="Render Flags 1 (Visual)", icon='RESTRICT_RENDER_OFF')
             
-            if obj.type == 'MESH':
-                # Render Flags 1
-                box.prop(obj, "render_flags", text="Render Flags")
-                
-                # Render Flags 2
-                split = box.split(factor=0.5)
-                split.prop(obj, "render_flags2", text="Render Flags 2")
-                
-                col = split.column(align=True)
-                r = col.row(); r.prop(obj, "rf2_depth_bias"); r.prop(obj, "rf2_shadowed")
-                r = col.row(); r.prop(obj, "rf2_tex_proj"); r.prop(obj, "rf2_no_fog")
+            row = box.row()
+            row.prop(obj, "render_flags", text="Raw Int")
             
-            # Cull Flags
-            split = box.split(factor=0.5)
-            split.prop(obj, "cull_flags", text="Culling Flags")
+            # Active Checkbox - Top Left
+            row = box.row()
+            row.prop(obj, "rf1_active")
+            box.separator()
             
-            cull_col = split.column(align=True)
-            r = cull_col.row(); r.prop(obj, "cf_enabled"); r.prop(obj, "cf_unknown2"); r.prop(obj, "cf_unknown3"); r.prop(obj, "cf_unknown4")
-            r = cull_col.row(); r.prop(obj, "cf_unknown5"); r.prop(obj, "cf_unknown6"); r.prop(obj, "cf_unknown7"); r.prop(obj, "cf_unknown8")
+            # Using grid for flags
+            grid = box.grid_flow(row_major=True, columns=2, even_columns=True, align=True)
+            grid.prop(obj, "rf1_cast_shadow")
+            grid.prop(obj, "rf1_receive_shadow")
+            grid.prop(obj, "rf1_draw_last")
+            grid.prop(obj, "rf1_zbias")
             
-            # String Params
-            box.prop(obj, "ls3d_user_props", text="String Params")
+            box = layout.box()
+            box.label(text="Render Flags 2 (Logic)", icon='MODIFIER')
+            row = box.row()
+            row.prop(obj, "render_flags2", text="Raw Int")
             
-            layout.separator()
-            
-            # --- EXTRA PARAMETERS ---
-            
-            # LOD
-            if obj.type == 'MESH':
-                box = layout.box()
-                box.prop(obj, "ls3d_lod_dist")
-            
-            # Portal
-            if "plane" in obj.name.lower() or "portal" in obj.name.lower():
-                box = layout.box()
-                box.label(text="Portal", icon='OUTLINER_OB_LIGHT')
-                box.prop(obj, "ls3d_portal_enabled")
-                box.prop(obj, "ls3d_portal_flags")
-                row = box.row()
-                row.prop(obj, "ls3d_portal_near")
-                row.prop(obj, "ls3d_portal_far")
-                box.prop(obj, "ls3d_portal_unknown")
+            grid = box.grid_flow(row_major=True, columns=2, even_columns=True, align=True)
+            grid.prop(obj, "rf2_decal")
+            grid.prop(obj, "rf2_stencil")
+            grid.prop(obj, "rf2_mirror")
+            grid.prop(obj, "rf2_proj")
+            grid.prop(obj, "rf2_nofog")
 
-            # Sector
-            if obj.type == 'MESH' and "sector" in obj.name.lower():
-                box = layout.box()
-                box.label(text="Sector", icon='SCENE_DATA')
-                box.prop(obj, "ls3d_sector_flags1")
-                box.prop(obj, "ls3d_sector_flags2")
+        # --- CULL FLAGS ---
+        box = layout.box()
+        box.label(text="Culling & Collision", icon='PHYSICS')
+        box.prop(obj, "cull_flags", text="Raw Int")
+        
+        # Visible is separate
+        box.prop(obj, "cf_visible")
 
-            # Billboard
-            if obj.type == 'MESH' and obj.visual_type == '4':
-                box = layout.box()
-                box.label(text="Billboard", icon='IMAGE_PLANE')
-                box.prop(obj, "rot_mode")
-                box.prop(obj, "rot_axis")
+        # Label above the checkboxes
+        box.label(text="Collision Masks:")
+        
+        grid = box.grid_flow(row_major=True, columns=2, even_columns=True, align=True)
+        grid.prop(obj, "cf_coll_player")
+        grid.prop(obj, "cf_coll_ai")
+        grid.prop(obj, "cf_coll_vehicle")
+        grid.prop(obj, "cf_coll_camera")
+        grid.prop(obj, "cf_coll_proj")
+        grid.prop(obj, "cf_coll_item")
 
-            # Mirror
-            if obj.type == 'MESH' and obj.visual_type == '8':
-                box = layout.box()
-                box.label(text="Mirror", icon='MOD_MIRROR')
-                box.prop(obj, "mirror_color")
-                box.prop(obj, "mirror_dist")
+        box.prop(obj, "cf_light_int")
 
-            layout.separator()
-            if obj.type == 'MESH':
-                layout.label(text="LS3D Material Tools:")
-                layout.operator("node.add_ls3d_group", icon='NODE')
-                
+        # --- PARAMS ---
+        box = layout.box()
+        box.label(text="Special Properties")
+        box.prop(obj, "ls3d_user_props", text="", icon='TEXT')
+
+        # --- LOD ---
+        if obj.type == 'MESH':
+            box = layout.box()
+            box.label(text="Level-Of-Detail Settings", icon='MESH_DATA')
+            box.prop(obj, "ls3d_lod_dist")
+
+        # --- SPECIFIC TYPES ---
+        if "plane" in obj.name.lower() or "portal" in obj.name.lower():
+            box = layout.box()
+            box.label(text="Portal", icon='OUTLINER_OB_LIGHT')
+            box.prop(obj, "ls3d_portal_enabled", toggle=True)
+            box.prop(obj, "ls3d_portal_flags")
+            row = box.row(align=True)
+            row.prop(obj, "ls3d_portal_near")
+            row.prop(obj, "ls3d_portal_far")
+
+        if obj.type == 'MESH' and "sector" in obj.name.lower():
+            box = layout.box()
+            box.label(text="Sector", icon='SCENE_DATA')
+            box.prop(obj, "ls3d_sector_flags1")
+            box.prop(obj, "ls3d_sector_flags2")
+
+        if obj.type == 'MESH' and hasattr(obj, "visual_type") and obj.visual_type == '4':
+            box = layout.box()
+            box.label(text="Billboard", icon='IMAGE_PLANE')
+            box.prop(obj, "rot_mode")
+            box.prop(obj, "rot_axis")
+
+        if obj.type == 'MESH' and hasattr(obj, "visual_type") and obj.visual_type == '8':
+            box = layout.box()
+            box.label(text="Mirror", icon='MOD_MIRROR')
+            box.prop(obj, "mirror_color")
+            box.prop(obj, "mirror_dist")
+
 def safe_link(tree, from_socket, to_socket):
     if from_socket and to_socket:
         tree.links.new(from_socket, to_socket)
@@ -164,158 +195,201 @@ def safe_link(tree, from_socket, to_socket):
 def get_or_create_ls3d_group():
     group_name = "LS3D Material Data"
     
-    # 1. Get or Create Group
     if group_name in bpy.data.node_groups:
         ng = bpy.data.node_groups[group_name]
-        # Check if we need to update the internal logic (if Mix Shader is missing)
-        has_mix = any(n.type == 'MIX_SHADER' for n in ng.nodes)
-        if not has_mix:
-            ng.nodes.clear() # Rebuild old versions
+        # Cleanup if structure is outdated or has old sockets
+        if any(n in s.name for s in ng.interface.items_tree for n in ["Tint", "Key", "Emission", "Environment"]):
+            ng.nodes.clear(); ng.interface.clear()
     else:
         ng = bpy.data.node_groups.new(name=group_name, type='ShaderNodeTree')
 
-    # 2. Create Interface (Sockets)
-    # Use check to prevent duplicate sockets on re-run
+    # Interface
     if not ng.interface.items_tree:
-        ng.interface.new_socket("Environment Color", in_out='INPUT', socket_type='NodeSocketColor')
-        ng.interface.new_socket("Diffuse Color", in_out='INPUT', socket_type='NodeSocketColor')
-        ng.interface.new_socket("Emission Color", in_out='INPUT', socket_type='NodeSocketColor')
-        ng.interface.new_socket("Color Key Value", in_out='INPUT', socket_type='NodeSocketColor')
+        # Texture Inputs
+        ng.interface.new_socket("Diffuse Map", in_out='INPUT', socket_type='NodeSocketColor')
+        ng.interface.new_socket("Alpha Map", in_out='INPUT', socket_type='NodeSocketColor')
+        ng.interface.new_socket("Reflection", in_out='INPUT', socket_type='NodeSocketColor')
         
-        ng.interface.new_socket("Opacity", in_out='INPUT', socket_type='NodeSocketFloat')
-        ng.interface.new_socket("Env Intensity", in_out='INPUT', socket_type='NodeSocketFloat')
+        # Values
+        op_socket = ng.interface.new_socket("Opacity", in_out='INPUT', socket_type='NodeSocketFloat')
         
-        ng.interface.new_socket("F: Double Sided", in_out='INPUT', socket_type='NodeSocketFloat')
-        ng.interface.new_socket("F: Colored", in_out='INPUT', socket_type='NodeSocketFloat')
-        ng.interface.new_socket("F: Unlit", in_out='INPUT', socket_type='NodeSocketFloat') # The Socket
-        ng.interface.new_socket("F: Color Key", in_out='INPUT', socket_type='NodeSocketFloat')
-        ng.interface.new_socket("F: Add Effect (Alpha)", in_out='INPUT', socket_type='NodeSocketFloat')
-        ng.interface.new_socket("F: Env Map", in_out='INPUT', socket_type='NodeSocketFloat')
-        ng.interface.new_socket("F: Disable Z-Write", in_out='INPUT', socket_type='NodeSocketFloat')
-        ng.interface.new_socket("F: Mip Map", in_out='INPUT', socket_type='NodeSocketFloat')
+        # Info (Pass-through for scripts/drivers if needed)
+        ng.interface.new_socket("Anim Frames", in_out='INPUT', socket_type='NodeSocketFloat')
+        ng.interface.new_socket("Anim Period", in_out='INPUT', socket_type='NodeSocketFloat')
+        ng.interface.new_socket("Env Mode", in_out='INPUT', socket_type='NodeSocketFloat')
+        ng.interface.new_socket("Env Type", in_out='INPUT', socket_type='NodeSocketFloat')
 
         ng.interface.new_socket("BSDF", in_out='OUTPUT', socket_type='NodeSocketShader')
 
-    # Ensure sockets exist if group existed but was old
-    if "F: Unlit" not in ng.interface.items_tree:
-         ng.interface.new_socket("F: Unlit", in_out='INPUT', socket_type='NodeSocketFloat')
+    # Setup Defaults
+    for socket in ng.interface.items_tree:
+        if socket.bl_socket_idname == 'NodeSocketColor':
+            socket.default_value = (1.0, 1.0, 1.0, 1.0)
+            if "Reflection" in socket.name: 
+                socket.default_value = (0.0, 0.0, 0.0, 1.0)
+        elif socket.bl_socket_idname == 'NodeSocketFloat':
+            socket.default_value = 0.0
+            if "Opacity" in socket.name: 
+                socket.default_value = 100.0
+                socket.min_value = 0.0
+                socket.max_value = 100.0
+            if "Env Mode" in socket.name: socket.default_value = 2.0 
 
-    # 3. Create Nodes
-    # If nodes exist, we skip creation to preserve existing layout, 
-    # unless we cleared it above because it was outdated.
+    # Nodes Construction
     if not ng.nodes:
         input_node = ng.nodes.new('NodeGroupInput')
-        input_node.location = (-800, 0)
+        input_node.location = (-1000, 0)
         output_node = ng.nodes.new('NodeGroupOutput')
-        output_node.location = (800, 0)
+        output_node.location = (600, 0)
         
-        # Lit Shader
-        principled = ng.nodes.new('ShaderNodeBsdfPrincipled')
-        principled.location = (300, 100)
-        
-        # Unlit Shader (Emission)
-        emission = ng.nodes.new('ShaderNodeEmission')
-        emission.location = (300, -150)
-        emission.label = "Unlit (Shadeless)"
-        
-        # Switcher
-        mix_shader = ng.nodes.new('ShaderNodeMixShader')
-        mix_shader.location = (600, 0)
-        mix_shader.label = "Lit/Unlit Switch"
-        
-        # Alpha/Color Key Logic
-        dist_node = ng.nodes.new('ShaderNodeVectorMath')
-        dist_node.operation = 'DISTANCE'
-        dist_node.location = (-400, -200)
-        
-        is_match = ng.nodes.new('ShaderNodeMath')
-        is_match.operation = 'LESS_THAN'
-        is_match.inputs[1].default_value = 0.005 
-        is_match.location = (-200, -200)
-        
-        flag_check = ng.nodes.new('ShaderNodeMath')
-        flag_check.operation = 'MULTIPLY'
-        flag_check.location = (-50, -200)
-        
-        invert_mask = ng.nodes.new('ShaderNodeMath')
-        invert_mask.operation = 'SUBTRACT'
-        invert_mask.inputs[0].default_value = 1.0
-        invert_mask.location = (100, -200)
-        
-        final_alpha = ng.nodes.new('ShaderNodeMath')
-        final_alpha.operation = 'MULTIPLY'
-        final_alpha.location = (100, -350)
-        
-        # Defaults
-        for socket in ng.interface.items_tree:
-            if socket.bl_socket_idname == 'NodeSocketColor':
-                if "Environment" in socket.name: socket.default_value = (0.5, 0.5, 0.5, 1.0)
-                elif "Color Key" in socket.name: socket.default_value = (1.0, 0.0, 1.0, 1.0) 
-                else: socket.default_value = (1.0, 1.0, 1.0, 1.0)
-            elif socket.bl_socket_idname == 'NodeSocketFloat':
-                if "Opacity" in socket.name: socket.default_value = 1.0
-                else: socket.default_value = 0.0
-                if "F:" in socket.name: socket.min_value = 0.0; socket.max_value = 1.0
+        # 1. Add Environment/Reflection (Diffuse + Reflection)
+        # Note: We removed Diffuse Tint multiplication. Diffuse Map goes straight here.
+        add_env = ng.nodes.new('ShaderNodeMixRGB')
+        add_env.blend_type = 'ADD'
+        add_env.inputs['Fac'].default_value = 1.0
+        add_env.location = (-700, 200)
 
-        # Links
+        # 2. Opacity Logic (0-100 -> 0-1)
+        math_op_scale = ng.nodes.new('ShaderNodeMath')
+        math_op_scale.operation = 'DIVIDE'
+        math_op_scale.inputs[1].default_value = 100.0
+        math_op_scale.location = (-900, -100)
+
+        # 3. Alpha Logic (Opacity * Alpha Map)
+        math_alpha = ng.nodes.new('ShaderNodeMath')
+        math_alpha.operation = 'MULTIPLY'
+        math_alpha.location = (-700, -100)
+
+        # 4. Shader
+        principled = ng.nodes.new('ShaderNodeBsdfPrincipled')
+        principled.location = (0, 200)
+        # Matte base. Reflections are added via Texture input, not PBR specular.
+        principled.inputs["Roughness"].default_value = 1.0 
+        principled.inputs["Specular IOR Level"].default_value = 0.0
+        principled.inputs["Metallic"].default_value = 0.0
+        principled.inputs["Emission Color"].default_value = (0,0,0,1) # No input, default to black
+        
+        emission = ng.nodes.new('ShaderNodeEmission')
+        emission.location = (0, -100)
+        
+        # Wiring
         inputs = input_node.outputs
         
-        # Connect to Lit
-        safe_link(ng, inputs.get("Diffuse Color"), principled.inputs["Base Color"])
-        safe_link(ng, inputs.get("Emission Color"), principled.inputs["Emission Color"])
-        safe_link(ng, inputs.get("Env Intensity"), principled.inputs["Metallic"])
+        # Diffuse & Reflection
+        safe_link(ng, inputs.get("Diffuse Map"), add_env.inputs[1])
+        safe_link(ng, inputs.get("Reflection"), add_env.inputs[2])
         
-        # Connect to Unlit (Use Diffuse as Emission Color)
-        safe_link(ng, inputs.get("Diffuse Color"), emission.inputs["Color"])
+        # Opacity Scaling
+        safe_link(ng, inputs.get("Opacity"), math_op_scale.inputs[0])
         
-        # Alpha Logic
-        safe_link(ng, inputs.get("Diffuse Color"), dist_node.inputs[0])
-        safe_link(ng, inputs.get("Color Key Value"), dist_node.inputs[1])
-        safe_link(ng, dist_node.outputs[0], is_match.inputs[0])
-        safe_link(ng, is_match.outputs[0], flag_check.inputs[0])
-        safe_link(ng, inputs.get("F: Color Key"), flag_check.inputs[1])
-        safe_link(ng, flag_check.outputs[0], invert_mask.inputs[1])
-        safe_link(ng, invert_mask.outputs[0], final_alpha.inputs[0])
-        safe_link(ng, inputs.get("Opacity"), final_alpha.inputs[1])
+        # Alpha Calculation
+        safe_link(ng, math_op_scale.outputs[0], math_alpha.inputs[0])
+        safe_link(ng, inputs.get("Alpha Map"), math_alpha.inputs[1])
         
-        # Connect Alpha to both
-        safe_link(ng, final_alpha.outputs[0], principled.inputs["Alpha"])
-        safe_link(ng, final_alpha.outputs[0], emission.inputs["Strength"]) 
+        # Shader Inputs
+        safe_link(ng, add_env.outputs[0], principled.inputs["Base Color"])
         
-        # Connect Switcher
-        # If F: Unlit is 1, use Emission (Socket 2). If 0, use Principled (Socket 1)
-        safe_link(ng, inputs.get("F: Unlit"), mix_shader.inputs["Fac"])
-        safe_link(ng, principled.outputs["BSDF"], mix_shader.inputs[1])
-        safe_link(ng, emission.outputs["Emission"], mix_shader.inputs[2])
+        # Alpha Connection
+        safe_link(ng, math_alpha.outputs[0], principled.inputs["Alpha"]) 
         
-        safe_link(ng, mix_shader.outputs["Shader"], output_node.inputs["BSDF"])
+        # Emission (Alternative flow)
+        safe_link(ng, add_env.outputs[0], emission.inputs["Color"])
+        safe_link(ng, math_alpha.outputs[0], emission.inputs["Strength"])
+        
+        # OUTPUT
+        safe_link(ng, principled.outputs[0], output_node.inputs["BSDF"])
     
     return ng
 
-class LS3D_OT_AddNode(bpy.types.Operator):
-    """Add LS3D Material Data Node to the current material"""
-    bl_idname = "node.add_ls3d_group"
-    bl_label = "Add LS3D Node"
+class LS3D_OT_AddEnvSetup(bpy.types.Operator):
+    """Add Reflection Texture Setup"""
+    bl_idname = "node.add_ls3d_env_setup"
+    bl_label = "Add Reflection"
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
-        obj = context.object
-        if not obj or not obj.active_material:
-            self.report({'ERROR'}, "No active object or material found.")
-            return {'CANCELLED'}
-        mat = obj.active_material
-        if not mat.use_nodes: mat.use_nodes = True
+        mat = context.object.active_material
+        if not mat or not mat.use_nodes: return {'CANCELLED'}
+        
         tree = mat.node_tree
-        group_data = get_or_create_ls3d_group()
-        group_node = tree.nodes.new('ShaderNodeGroup')
-        group_node.node_tree = group_data
-        group_node.location = (-300, 200)
-        group_node.width = 240
-        for n in tree.nodes: n.select = False
-        group_node.select = True
-        tree.nodes.active = group_node
+        nodes = tree.nodes
+        links = tree.links
+        
+        ls3d_node = next((n for n in nodes if n.type == 'GROUP' and n.node_tree and "LS3D Material Data" in n.node_tree.name), None)
+        if not ls3d_node: return {'CANCELLED'}
+
+        # 1. Frame
+        frame = nodes.new('NodeFrame')
+        frame.label = "Reflection"
+        frame.location = (-600, -400)
+        
+        # 2. Nodes
+        coord = nodes.new('ShaderNodeTexCoord')
+        coord.location = (-1100, -400); coord.parent = frame
+        
+        mapping = nodes.new('ShaderNodeMapping')
+        mapping.vector_type = 'TEXTURE'
+        mapping.location = (-900, -400); mapping.parent = frame
+        
+        tex_image = nodes.new('ShaderNodeTexImage')
+        tex_image.location = (-700, -400); tex_image.parent = frame
+        tex_image.label = "Reflection Map"
+        tex_image.projection = 'SPHERE' 
+        
+        env_group_data = get_or_create_env_group()
+        env_group = nodes.new('ShaderNodeGroup')
+        env_group.node_tree = env_group_data
+        env_group.location = (-400, -400); env_group.parent = frame
+        
+        # 3. Wiring
+        links.new(coord.outputs["Reflection"], mapping.inputs["Vector"])
+        links.new(mapping.outputs["Vector"], tex_image.inputs["Vector"])
+        links.new(tex_image.outputs["Color"], env_group.inputs["Color"])
+        links.new(env_group.outputs["Output"], ls3d_node.inputs["Reflection"])
+        
+        # Toggle property instead of node socket
+        mat.ls3d_env_enabled = True
+        
         return {'FINISHED'}
+                    
+def get_or_create_env_group():
+    group_name = "LS3D Environment"
     
+    if group_name in bpy.data.node_groups:
+        return bpy.data.node_groups[group_name]
+    
+    ng = bpy.data.node_groups.new(name=group_name, type='ShaderNodeTree')
+    
+    # Interface
+    ng.interface.new_socket("Color", in_out='INPUT', socket_type='NodeSocketColor')
+    ng.interface.new_socket("Intensity", in_out='INPUT', socket_type='NodeSocketFloat')
+    ng.interface.new_socket("Output", in_out='OUTPUT', socket_type='NodeSocketColor')
+    
+    # Default values
+    if "Intensity" in ng.interface.items_tree:
+        ng.interface.items_tree["Intensity"].default_value = 1.0
+        ng.interface.items_tree["Intensity"].min_value = 0.0
+        ng.interface.items_tree["Intensity"].max_value = 100.0 # Clamp max
+    
+    # Nodes
+    input_node = ng.nodes.new('NodeGroupInput')
+    input_node.location = (-300, 0)
+    
+    output_node = ng.nodes.new('NodeGroupOutput')
+    output_node.location = (300, 0)
+    
+    mix = ng.nodes.new('ShaderNodeMixRGB')
+    mix.blend_type = 'MULTIPLY'
+    mix.inputs['Fac'].default_value = 1.0
+    mix.location = (0, 0)
+    
+    # Links
+    ng.links.new(input_node.outputs["Color"], mix.inputs[1])
+    ng.links.new(input_node.outputs["Intensity"], mix.inputs[2])
+    ng.links.new(mix.outputs[0], output_node.inputs["Output"])
+    
+    return ng
+
 class LS3D_OT_AddNode(bpy.types.Operator):
     """Add LS3D Material Data Node to the current material"""
     bl_idname = "node.add_ls3d_group"
@@ -382,16 +456,24 @@ class The4DSExporter:
                         materials.add(slot.material)
         return list(materials)
     def find_texture_node(self, node):
-        """Recursively find an Image Texture node feeding into this node."""
+        """Recursively find an Image Texture node."""
         if not node:
             return None
+            
+        # Case A: It is an Image Node
         if node.type == 'TEX_IMAGE':
             return node
-      
-        # Pass through Mix/Add/Multiply nodes
-        if node.type in {'MIX_RGB', 'MATH', 'MIX_SHADER', 'ADD_SHADER'}:
-            # Check inputs. Usually input[1] or input[2] for MixRGB color slots.
-            # We check all linked inputs for an image.
+            
+        # Case B: It is a Node Group (Dig inside)
+        if node.type == 'GROUP' and node.node_tree:
+            # Look for the specific texture node inside the group
+            # We prioritize nodes labeled "Env Texture" or just the first image node found
+            for inner_node in node.node_tree.nodes:
+                if inner_node.type == 'TEX_IMAGE':
+                    return inner_node
+        
+        # Case C: Pass-through nodes (Mix, Math, etc)
+        if hasattr(node, "inputs"):
             for input_socket in node.inputs:
                 if input_socket.is_linked:
                     found = self.find_texture_node(input_socket.links[0].from_node)
@@ -543,115 +625,152 @@ class The4DSExporter:
         f.write(struct.pack("<I", bone_idx))
     
     def serialize_material(self, f, mat, mat_index):
-        # 1. Try to find the LS3D Node Group
-        nodes = mat.node_tree.nodes if mat.use_nodes else []
-        ls3d_node = next((n for n in nodes if n.type == 'GROUP' and n.node_tree and "LS3D Material Data" in n.node_tree.name), None)
+        # 1. Colors & Opacity
+        env_color = getattr(mat, "ls3d_ambient_color", (0.5, 0.5, 0.5))
+        diffuse_color = getattr(mat, "ls3d_diffuse_color", (1.0, 1.0, 1.0))
+        emission_color = getattr(mat, "ls3d_emission_color", (0.0, 0.0, 0.0))
         
-        flags = 0
-        diffuse_tex = ""
-        alpha_tex = ""
-        env_tex = ""
-        
-        # Defaults (Fallback only)
-        env_color = (0.5, 0.5, 0.5)
-        diffuse_color = (1.0, 1.0, 1.0)
-        emission_color = (0.0, 0.0, 0.0)
         opacity = 1.0
-        env_opacity = 0.0
+        if mat.use_nodes and mat.node_tree:
+            ls3d_node = next((n for n in mat.node_tree.nodes if n.type == 'GROUP' and n.node_tree and "LS3D Material Data" in n.node_tree.name), None)
+            if ls3d_node and "Opacity" in ls3d_node.inputs:
+                opacity = ls3d_node.inputs["Opacity"].default_value / 100.0
 
-        if ls3d_node:
-            inputs = ls3d_node.inputs
-            # --- CRITICAL FIX: Read Colors exactly as imported ---
-            # Do not multiply or modify these.
-            env_color = inputs["Environment Color"].default_value[:3]
-            diffuse_color = inputs["Diffuse Color"].default_value[:3]
-            emission_color = inputs["Emission Color"].default_value[:3]
-            opacity = inputs["Opacity"].default_value
-            env_opacity = inputs["Env Intensity"].default_value
-            
-            # Read Flags
-            if inputs["F: Double Sided"].default_value > 0.5: flags |= MTL_DOUBLESIDED
-            if inputs["F: Colored"].default_value > 0.5: flags |= MTL_COLORED
-            if inputs["F: Unlit"].default_value > 0.5: flags |= MTL_UNLIT
-            if inputs["F: Color Key"].default_value > 0.5: flags |= MTL_COLORKEY
-            if inputs["F: Add Effect (Alpha)"].default_value > 0.5: flags |= MTL_ADDEFFECT
-            if inputs["F: Env Map"].default_value > 0.5: flags |= MTL_ENVMAP
-            if inputs["F: Mip Map"].default_value > 0.5: flags |= MTL_MIPMAP
-            if inputs["F: Disable Z-Write"].default_value > 0.5: flags |= MTL_ADDITIVEMIX 
+        # 2. BUILD FLAGS (Using Constants)
+        final_flags = 0
+        
+        # High Word / Standard
+        if not mat.ls3d_misc_tile_u:  final_flags |= MTL_DISABLE_U_TILING
+        if not mat.ls3d_misc_tile_v:  final_flags |= MTL_DISABLE_V_TILING
+        if mat.ls3d_diff_enabled:     final_flags |= MTL_DIFFUSETEX
+        if mat.ls3d_env_enabled:      final_flags |= MTL_ENVMAP
+        if mat.ls3d_calc_reflect_y:   final_flags |= MTL_CALCREFLECTTEXY
+        if mat.ls3d_proj_reflect_y:   final_flags |= MTL_PROJECTREFLECTTEXY
+        if mat.ls3d_proj_reflect_z:   final_flags |= MTL_PROJECTREFLECTTEXZ
+        if mat.ls3d_diff_mipmap:      final_flags |= MTL_MIPMAP
+        if mat.ls3d_alpha_imgalpha:   final_flags |= MTL_ALPHA_IN_TEX
+        if mat.ls3d_alpha_anim:       final_flags |= MTL_ANIMATED_ALPHA
+        if mat.ls3d_diff_anim:        final_flags |= MTL_ANIMATED_DIFFUSE
+        if mat.ls3d_diff_colored:     final_flags |= MTL_COLORED
+        if mat.ls3d_diff_2sided:      final_flags |= MTL_DOUBLESIDED
+        if mat.ls3d_alpha_colorkey:   final_flags |= MTL_COLORKEY
+        if mat.ls3d_alpha_enabled:    final_flags |= MTL_ALPHA
+        if mat.ls3d_alpha_addmix:     final_flags |= MTL_ADDITIVE
+        if mat.ls3d_misc_zwrite:      final_flags |= MTL_ADDITIVE # Fallback for Z-Write
 
-            # Detect Textures
-            if inputs["Diffuse Color"].is_linked:
-                link = inputs["Diffuse Color"].links[0]
-                tex = self.find_texture_node(link.from_node)
-                if tex and tex.image:
-                    diffuse_tex = os.path.basename(tex.image.filepath or tex.image.name).upper()
-                    flags |= MTL_DIFFUSETEX 
-            else:
-                # If no texture is linked, we MUST set Colored flag so the Diffuse Color is used
-                flags |= MTL_COLORED
-            
-            if inputs["Opacity"].is_linked:
-                link = inputs["Opacity"].links[0]
-                tex = self.find_texture_node(link.from_node)
-                if tex and tex.image:
-                    tname = os.path.basename(tex.image.filepath or tex.image.name).upper()
-                    if tname != diffuse_tex:
-                        alpha_tex = tname
-                        flags |= MTL_ALPHATEX
-        else:
-            # Fallback for Materials created by user without the Addon Node
-            flags |= MTL_COLORED
-            if hasattr(mat, 'diffuse_color'):
-                base = mat.diffuse_color[:3]
-                diffuse_color = tuple(base)
-                # Only here do we guess ambient
-                env_color = (base[0] * 0.5, base[1] * 0.5, base[2] * 0.5)
-            
-        f.write(struct.pack("<I", flags))
+        # Environment Byte
+        if mat.ls3d_env_overlay:      final_flags |= MTL_ENV_OVERLAY
+        if mat.ls3d_env_multiply:     final_flags |= MTL_ENV_MULTIPLY
+        if mat.ls3d_env_additive:     final_flags |= MTL_ENV_ADDITIVE
+        if mat.ls3d_disable_tex:      final_flags |= MTL_ENV_DISABLE_TEX
+        if mat.ls3d_env_yproj:        final_flags |= MTL_ENV_PROJECT_Y
+        if mat.ls3d_env_ydet:         final_flags |= MTL_ENV_DETERMINED_Y
+        if mat.ls3d_env_zdet:         final_flags |= MTL_ENV_DETERMINED_Z
+        if mat.ls3d_alpha_effect:     final_flags |= MTL_ENV_ADDEFFECT
+
+        # Misc Byte
+        if mat.ls3d_misc_unlit:       final_flags |= MTL_MISC_UNLIT
+
+        # 3. WRITE DATA
+        f.write(struct.pack("<I", final_flags))
         f.write(struct.pack("<3f", *env_color))
         f.write(struct.pack("<3f", *diffuse_color))
         f.write(struct.pack("<3f", *emission_color))
         f.write(struct.pack("<f", opacity))
 
-        if flags & MTL_ENVMAP:
+        # 4. TEXTURE NODES
+        env_opacity = 0.0
+        env_tex = ""
+        diffuse_tex = ""
+        alpha_tex = ""
+
+        if mat.use_nodes and mat.node_tree:
+             nodes = mat.node_tree.nodes
+             ls3d_node = next((n for n in nodes if n.type == 'GROUP' and n.node_tree and "LS3D Material Data" in n.node_tree.name), None)
+             
+             if ls3d_node:
+                 if "Diffuse Map" in ls3d_node.inputs and ls3d_node.inputs["Diffuse Map"].is_linked:
+                     tex = self.find_texture_node(ls3d_node.inputs["Diffuse Map"].links[0].from_node)
+                     if tex and tex.image: diffuse_tex = os.path.basename(tex.image.filepath or tex.image.name)
+                 
+                 if mat.ls3d_alpha_enabled and "Alpha Map" in ls3d_node.inputs and ls3d_node.inputs["Alpha Map"].is_linked:
+                     tex = self.find_texture_node(ls3d_node.inputs["Alpha Map"].links[0].from_node)
+                     if tex and tex.image: alpha_tex = os.path.basename(tex.image.filepath or tex.image.name)
+                 
+                 if mat.ls3d_env_enabled and "Reflection" in ls3d_node.inputs and ls3d_node.inputs["Reflection"].is_linked:
+                     link_node = ls3d_node.inputs["Reflection"].links[0].from_node
+                     if link_node.type == 'GROUP' and link_node.node_tree and "LS3D Environment" in link_node.node_tree.name:
+                         if "Intensity" in link_node.inputs: env_opacity = link_node.inputs["Intensity"].default_value
+                         if link_node.inputs["Color"].is_linked:
+                             tex = self.find_texture_node(link_node.inputs["Color"].links[0].from_node)
+                             if tex and tex.image: env_tex = os.path.basename(tex.image.filepath or tex.image.name)
+                     else:
+                         tex = self.find_texture_node(link_node)
+                         if tex and tex.image: 
+                             env_tex = os.path.basename(tex.image.filepath or tex.image.name); env_opacity = 1.0
+
+        if mat.ls3d_env_enabled:
             f.write(struct.pack("<f", env_opacity))
-            self.write_string(f, env_tex)
-
-        self.write_string(f, diffuse_tex)
-
-        if (flags & MTL_ADDEFFECT) and (flags & MTL_ALPHATEX):
-            self.write_string(f, alpha_tex)
+            self.write_string(f, env_tex.upper())
+        self.write_string(f, diffuse_tex.upper())
+        if mat.ls3d_alpha_enabled:
+            self.write_string(f, alpha_tex.upper())
+            
+        if mat.ls3d_diff_anim:
+            f.write(struct.pack("<I", mat.ls3d_diff_frame_count))
+            f.write(struct.pack("<H", 0))
+            f.write(struct.pack("<I", mat.ls3d_diff_frame_period))
+            f.write(struct.pack("<I", 0))
+            f.write(struct.pack("<I", 0))
 
     def serialize_object(self, f, obj, lods):
         f.write(struct.pack("<H", 0))
         f.write(struct.pack("<B", len(lods)))
         
+        # Initialize storage to prevent crash
+        self.current_lod_mappings = [] 
+        self.current_lod_counts = []
+        
+        # Helper: Quantization for vertex deduplication (5 decimals)
+        def quant(val):
+            if abs(val) < 0.00001: val = 0.0
+            return int(val * 100000.0)
+
         for lod_idx, lod_obj in enumerate(lods):
-            # 1. Get Mesh Data
-            mesh = lod_obj.data
+            # --- 1. HANDLE FADE DISTANCE ---
+            # STRICTLY READ FROM UI: No auto-correction, no forcing LOD0 to 0.
+            # We trust the user has set the correct value in the panel.
+            dist = getattr(lod_obj, "ls3d_lod_dist", 0.0)
             
-            # 2. Create BMesh to Triangulate
+            f.write(struct.pack("<f", float(dist)))
+            
+            # --- 2. MESH PROCESSING ---
+            try:
+                # Blender 5.0 safe evaluation
+                depsgraph = bpy.context.evaluated_depsgraph_get()
+                eval_obj = lod_obj.evaluated_get(depsgraph)
+                temp_mesh = eval_obj.to_mesh()
+            except:
+                temp_mesh = lod_obj.data.copy()
+
+            # Triangulate
             bm = bmesh.new()
-            bm.from_mesh(mesh)
-            bmesh.ops.triangulate(bm, faces=bm.faces)
-            
-            # 3. Convert to Temp Mesh for Loop Normals
-            # We cannot use BMesh directly for loop normals easily in export without calc
-            temp_mesh = bpy.data.meshes.new("TempExportMesh")
+            bm.from_mesh(temp_mesh)
+            bmesh.ops.triangulate(bm, faces=bm.faces, quad_method='BEAUTY', ngon_method='BEAUTY')
             bm.to_mesh(temp_mesh)
             bm.free()
             
-            # Ensure normals are calculated
-            if not temp_mesh.has_custom_normals:
-                temp_mesh.calc_normals()
-            
+            # Access Data Layers
             uv_layer = temp_mesh.uv_layers.active.data if temp_mesh.uv_layers.active else None
-            
             unique_verts = {}
             final_verts = []
             mat_groups = {}
+            vert_map = {} 
             
-            # 4. Iterate POLYGONS (Not Faces) on Temp Mesh
+            # Ensure normals are ready
+            try: temp_mesh.calc_normals_split()
+            except: pass
+            
             for poly in temp_mesh.polygons:
                 f_indices = []
                 for loop_index in poly.loop_indices:
@@ -659,22 +778,18 @@ class The4DSExporter:
                     v_index = loop.vertex_index
                     v_co = temp_mesh.vertices[v_index].co
                     
-                    # UV
                     u, v_coord = (0.0, 0.0)
                     if uv_layer:
-                        uv_data = uv_layer[loop_index].uv
-                        u, v_coord = uv_data[0], 1.0 - uv_data[1]
+                        d = uv_layer[loop_index].uv
+                        u, v_coord = d[0], 1.0 - d[1]
                     
-                    # --- NORMAL FIX ---
-                    # Use LOOP normal. This preserves Split Normals / Hard Edges.
-                    # Previous code used v.normal which averaged them (causing the 0.94 value).
-                    nx, ny, nz = loop.normal.x, loop.normal.y, loop.normal.z
+                    norm = loop.normal
                     
-                    # Deduplication Key (Includes Normal)
+                    # Deduplication Key
                     key = (
-                        round(v_co.x, 5), round(v_co.y, 5), round(v_co.z, 5),
-                        round(nx, 5), round(ny, 5), round(nz, 5),
-                        round(u, 5), round(v_coord, 5)
+                        quant(v_co.x), quant(v_co.y), quant(v_co.z),
+                        quant(norm.x), quant(norm.y), quant(norm.z),
+                        quant(u), quant(v_coord)
                     )
                     
                     if key in unique_verts:
@@ -682,53 +797,52 @@ class The4DSExporter:
                     else:
                         idx = len(final_verts)
                         unique_verts[key] = idx
-                        # Swap Axis X, Z, Y for Mafia
                         final_verts.append({
                             'pos': (v_co.x, v_co.z, v_co.y),
-                            'norm': (nx, nz, ny), 
+                            'norm': (norm.x, norm.z, norm.y),
                             'uv': (u, v_coord)
                         })
+                    
+                    # Map for skinning
+                    if v_index not in vert_map: vert_map[v_index] = []
+                    if idx not in vert_map[v_index]: vert_map[v_index].append(idx)
+                    
                     f_indices.append(idx)
                 
                 mat_groups.setdefault(poly.material_index, []).append(f_indices)
             
-            # Clean up temp mesh
-            bpy.data.meshes.remove(temp_mesh)
+            lod_obj.to_mesh_clear()
             
-            # Write LOD Distance
-            # If property exists, use it. If LOD 0, default to 0.0 (Matches original file).
-            if hasattr(lod_obj, "ls3d_lod_dist"):
-                dist = lod_obj.ls3d_lod_dist
-            else:
-                dist = 0.0 if lod_idx == 0 else 100.0 * lod_idx
-            
-            f.write(struct.pack("<f", dist))
-            
-            # Write Verts
+            self.current_lod_mappings.append(vert_map)
+            self.current_lod_counts.append(len(final_verts))
+
+            # --- 3. WRITE DATA ---
             f.write(struct.pack("<H", len(final_verts)))
             for v in final_verts:
                 f.write(struct.pack("<3f", *v['pos']))
                 f.write(struct.pack("<3f", *v['norm']))
                 f.write(struct.pack("<2f", *v['uv']))
             
-            # Write Faces
             f.write(struct.pack("<B", len(mat_groups)))
             for mat_idx, faces in mat_groups.items():
                 f.write(struct.pack("<H", len(faces)))
-                for idxs in faces:
-                    f.write(struct.pack("<3H", idxs[0], idxs[2], idxs[1]))
+                for tri in faces:
+                    if len(tri) == 3:
+                        f.write(struct.pack("<3H", tri[0], tri[2], tri[1]))
                 
-                real_mat = lod_obj.material_slots[mat_idx].material if mat_idx < len(lod_obj.material_slots) else None
-                mat_id = self.materials.index(real_mat) + 1 if real_mat in self.materials else 0
+                mat_id = 0
+                if mat_idx < len(lod_obj.material_slots):
+                    real_mat = lod_obj.material_slots[mat_idx].material
+                    if real_mat in self.materials:
+                        mat_id = self.materials.index(real_mat) + 1
                 f.write(struct.pack("<H", mat_id))
             
         return len(lods)
-                        
+    
     def serialize_frame(self, f, obj):
         frame_type = FRAME_VISUAL
         visual_type = VISUAL_OBJECT
         
-        # Read Render Flags from UI properties
         r_flag1 = getattr(obj, "render_flags", 128)
         r_flag2 = getattr(obj, "render_flags2", 42)
         visual_flags = (r_flag1, r_flag2)
@@ -736,15 +850,13 @@ class The4DSExporter:
         if obj.type == "MESH":
             if hasattr(obj, "visual_type"):
                 visual_type = int(obj.visual_type)
-                # Validation for Skinned Meshes
                 if visual_type in (VISUAL_SINGLEMESH, VISUAL_SINGLEMORPH):
                     has_arm = any(m.type == 'ARMATURE' and m.object for m in obj.modifiers)
                     if not has_arm: visual_type = VISUAL_OBJECT
             else:
-                # Auto-detect
                 if obj.modifiers and any(mod.type == "ARMATURE" for mod in obj.modifiers):
                     visual_type = VISUAL_SINGLEMORPH if obj.data.shape_keys else VISUAL_SINGLEMESH
-                elif "portal" in obj.name.lower(): pass # Skip (handled by sector)
+                elif "portal" in obj.name.lower(): pass 
                 elif "sector" in obj.name.lower(): frame_type = FRAME_SECTOR
                 elif obj.display_type == "WIRE": frame_type = FRAME_OCCLUDER
                 elif obj.data.shape_keys: visual_type = VISUAL_MORPH
@@ -752,19 +864,32 @@ class The4DSExporter:
         elif obj.type == "EMPTY":
             if obj.empty_display_type == "CUBE": frame_type = FRAME_DUMMY
             elif obj.empty_display_type == "PLAIN_AXES": frame_type = FRAME_TARGET
-        elif obj.type == "ARMATURE": return
-            
-        parent_id = self.frames_map.get(obj.parent, 0)
-        matrix = obj.matrix_local if obj.parent else obj.matrix_world
-        pos = matrix.to_translation()
-        rot = matrix.to_quaternion()
-        scale = matrix.to_scale()
+        
+        parent_id = 0
+        if obj.parent:
+            if obj.parent_type == 'BONE' and obj.parent_bone:
+                parent_id = self.joint_map.get(obj.parent_bone, 0)
+            elif obj.parent in self.frames_map:
+                parent_id = self.frames_map[obj.parent]
+        
         self.frames_map[obj] = self.frame_index
         self.frame_index += 1
         
-        # --- HEADER ---
-        f.write(struct.pack("<B", frame_type))
+        if obj.parent and obj.parent_type != 'BONE':
+             matrix = obj.parent.matrix_world.inverted() @ obj.matrix_world
+        elif obj.parent and obj.parent_type == 'BONE':
+             arm = obj.parent
+             bone = arm.data.bones[obj.parent_bone]
+             bone_world = arm.matrix_world @ bone.matrix_local
+             matrix = bone_world.inverted() @ obj.matrix_world
+        else:
+             matrix = obj.matrix_world
+             
+        pos = matrix.to_translation()
+        rot = matrix.to_quaternion()
+        scale = matrix.to_scale()
         
+        f.write(struct.pack("<B", frame_type))
         if frame_type == FRAME_VISUAL:
             f.write(struct.pack("<B", visual_type))
             f.write(struct.pack("<2B", *visual_flags))
@@ -773,37 +898,24 @@ class The4DSExporter:
         f.write(struct.pack("<3f", pos.x, pos.z, pos.y))
         f.write(struct.pack("<3f", scale.x, scale.z, scale.y))
         f.write(struct.pack("<4f", rot.w, rot.x, rot.z, rot.y))
-        
-        # Cull Flags
         f.write(struct.pack("<B", getattr(obj, "cull_flags", 128)))
-        
-        # Strings
         self.write_string(f, obj.name)
         self.write_string(f, getattr(obj, "ls3d_user_props", ""))
         
-        # --- BODY ---
         if frame_type == FRAME_VISUAL:
             lods = self.lod_map.get(obj, [obj])
+            num = self.serialize_object(f, obj, lods)
             
-            if visual_type in (VISUAL_OBJECT, VISUAL_LITOBJECT):
-                self.serialize_object(f, obj, lods)
-                
-            elif visual_type == VISUAL_BILLBOARD:
-                self.serialize_object(f, obj, lods)
-                self.serialize_billboard(f, obj) # NEW
-                
+            if visual_type == VISUAL_BILLBOARD:
+                self.serialize_billboard(f, obj)
             elif visual_type == VISUAL_MIRROR:
-                self.serialize_mirror(f, obj) # NEW
-                
+                self.serialize_mirror(f, obj)
             elif visual_type == VISUAL_SINGLEMESH:
-                num = self.serialize_object(f, obj, lods)
                 self.serialize_singlemesh(f, obj, num)
             elif visual_type == VISUAL_SINGLEMORPH:
-                num = self.serialize_object(f, obj, lods)
                 self.serialize_singlemesh(f, obj, num)
                 self.serialize_morph(f, obj, num)
             elif visual_type == VISUAL_MORPH:
-                num = self.serialize_object(f, obj, lods)
                 self.serialize_morph(f, obj, num)
 
         elif frame_type == FRAME_SECTOR:
@@ -915,76 +1027,280 @@ class The4DSExporter:
         bm.free()
     
     def serialize_joints(self, f, armature):
+        # We don't write the Armature Object itself as a frame, 
+        # but we need to pass its hierarchy context.
+        # Parent ID for the root bone is the Armature's parent (if any).
+        
+        arm_parent_id = 0
+        if armature.parent:
+             arm_parent_id = self.frames_map.get(armature.parent, 0)
+        
+        # Iterate bones
         for bone in armature.data.bones:
             frame_type = FRAME_JOINT
-            parent_id = self.joint_map.get(bone.parent.name, self.frames_map.get(armature, 0)) if bone.parent else 0
-            # Calculate Relative Transform for Header
+            
+            # Determine Parent ID
+            if bone.parent:
+                parent_id = self.joint_map.get(bone.parent.name, 0)
+            else:
+                # Root bone connects to Armature's parent
+                parent_id = arm_parent_id
+            
+            # Register this bone
+            self.joint_map[bone.name] = self.frame_index
+            self.frame_index += 1
+            
+            # Calculate Transform
             if bone.parent:
                 matrix = bone.parent.matrix_local.inverted() @ bone.matrix_local
             else:
                 matrix = bone.matrix_local
+            
             pos = matrix.to_translation()
             rot = matrix.to_quaternion()
             scale = matrix.to_scale()
-            self.joint_map[bone.name] = self.frame_index
-            self.frame_index += 1
+            
             f.write(struct.pack("<B", frame_type))
             f.write(struct.pack("<H", parent_id))
             f.write(struct.pack("<3f", pos.x, pos.z, pos.y))
             f.write(struct.pack("<3f", scale.x, scale.z, scale.y))
             f.write(struct.pack("<4f", rot.w, rot.x, rot.z, rot.y))
-            f.write(struct.pack("<B", 0))
+            f.write(struct.pack("<B", 0)) # Joint flags (unused?)
             self.write_string(f, bone.name)
-            self.write_string(f, "")
+            self.write_string(f, "") # User props
+            
+            # Joint Body
             self.serialize_joint(f, bone, armature, parent_id)
+            
     def collect_lods(self):
+        self.lod_map = {}
         all_lod_objects = set()
-        for obj in self.objects_to_export:
-            if obj.type != "MESH" or "_lod" not in obj.name:
-                continue
-            base_name = obj.name.split("_lod")[0]
-            base_obj = next((o for o in self.objects_to_export if o.name == base_name and o.type == "MESH"), None)
-            if base_obj:
-                if base_obj not in self.lod_map:
-                    self.lod_map[base_obj] = [base_obj]
-                lod_num = int(obj.name.split("_lod")[1])
-                if lod_num >= 1:
-                    all_lod_objects.add(obj)
-                    while len(self.lod_map[base_obj]) <= lod_num:
-                        self.lod_map[base_obj].append(None)
-                    self.lod_map[base_obj][lod_num] = obj
-        for base_obj in self.lod_map:
-            self.lod_map[base_obj] = [lod for lod in self.lod_map[base_obj] if lod is not None]
+        
+        base_objects = [o for o in self.objects_to_export if o.type == "MESH" and "_lod" not in o.name]
+        scene_objects = bpy.context.scene.objects
+        
+        for base_obj in base_objects:
+            self.lod_map[base_obj] = [base_obj]
+            base_name = base_obj.name
+            
+            for i in range(1, 10): 
+                target_name = f"{base_name}_lod{i}"
+                
+                if target_name in scene_objects:
+                    found_lod = scene_objects[target_name]
+                    if found_lod.type == "MESH":
+                        while len(self.lod_map[base_obj]) <= i:
+                            self.lod_map[base_obj].append(None)
+                        
+                        self.lod_map[base_obj][i] = found_lod
+                        all_lod_objects.add(found_lod)
+            
+            self.lod_map[base_obj] = [x for x in self.lod_map[base_obj] if x is not None]
+
         return all_lod_objects
+    
     def serialize_file(self):
         with open(self.filepath, "wb") as f:
             self.serialize_header(f)
+            
             self.materials = self.collect_materials()
             f.write(struct.pack("<H", len(self.materials)))
             for i, mat in enumerate(self.materials):
                 self.serialize_material(f, mat, i + 1)
-            lod_objects = self.collect_lods()
-            self.objects = [
+            
+            lod_objects_set = self.collect_lods()
+            
+            # SAFE CHECK: Use object names to check existence in scene
+            scene_names = set(o.name for o in bpy.context.scene.objects)
+            
+            raw_objects = [
                 obj for obj in self.objects_to_export
-                if obj.type in ("MESH", "EMPTY") and obj not in lod_objects
+                if obj.name in scene_names 
+                and obj not in lod_objects_set
+                and obj.type in ("MESH", "EMPTY", "ARMATURE")
             ]
-            armatures = [obj for obj in self.objects_to_export if obj.type == "ARMATURE"]
-            total_frames = len(self.objects) + sum(len(arm.data.bones) for arm in armatures)
+            
+            # HIERARCHY SORT
+            self.objects = []
+            roots = [o for o in raw_objects if (not o.parent) or (o.parent not in raw_objects)]
+            roots.sort(key=lambda x: x.name)
+
+            def sort_hierarchy(obj):
+                if obj in self.objects: return 
+                self.objects.append(obj)
+                children = [c for c in obj.children if c in raw_objects]
+                children.sort(key=lambda x: x.name)
+                for child in children:
+                    sort_hierarchy(child)
+
+            for root in roots:
+                sort_hierarchy(root)
+            
+            seen = set(self.objects)
+            leftovers = [o for o in raw_objects if o not in seen]
+            self.objects.extend(leftovers)
+
+            armatures = [obj for obj in self.objects if obj.type == "ARMATURE"]
+            visual_frames = [obj for obj in self.objects if obj.type != "ARMATURE"]
+            
+            bone_count = sum(len(arm.data.bones) for arm in armatures)
+            total_frames = len(visual_frames) + bone_count
+            
             f.write(struct.pack("<H", total_frames))
+            
+            self.frame_index = 1
+            self.frames_map = {} 
+            self.joint_map = {}
+            
             for obj in self.objects:
-                self.serialize_frame(f, obj)
-            for armature in armatures:
-                self.frames_map[armature] = self.frame_index
-                self.serialize_joints(f, armature)
+                if obj.type == "ARMATURE":
+                    self.serialize_joints(f, obj)
+                else:
+                    self.serialize_frame(f, obj)
+                
             f.write(struct.pack("<?", False))
+
+class The4DSPanelMaterial(bpy.types.Panel):
+    bl_label = "4DS Material Properties"
+    bl_idname = "MATERIAL_PT_4ds"
+    bl_space_type = 'PROPERTIES'
+    bl_region_type = 'WINDOW'
+    bl_context = "material"
+    
+    def draw(self, context):
+        mat = context.material
+        if not mat: return
+        layout = self.layout
+        
+        # 2. Colors
+        box = layout.box()
+        box.label(text="-Colors-", icon='COLOR')
+        col = box.column(align=True)
+        col.prop(mat, "ls3d_diffuse_color", text="Diffuse")
+        col.prop(mat, "ls3d_ambient_color", text="Environment")
+        col.prop(mat, "ls3d_emission_color", text="Emission")
+        
+        # 3. Textures
+        layout.label(text="-Textures-", icon='TEXTURE')
+        
+        # A. Diffuse
+        box = layout.box()
+        box.label(text="Diffuse", icon='SHADING_TEXTURE')
+        box.prop(mat, "ls3d_diff_enabled")
+        
+        col = box.column(align=True)
+        r = col.row()
+        r.prop(mat, "ls3d_diff_colored")
+        r.prop(mat, "ls3d_diff_anim")
+            
+        r = col.row()
+        r.prop(mat, "ls3d_diff_mipmap")
+        r.prop(mat, "ls3d_diff_2sided")
+
+        if mat.ls3d_diff_anim:
+            r = col.row(align=True)
+            r.prop(mat, "ls3d_diff_frame_count")
+            r.prop(mat, "ls3d_diff_frame_period")
+        
+        # B. Environment
+        box = layout.box()
+        box.label(text="Environment", icon='WORLD_DATA')
+        box.prop(mat, "ls3d_env_enabled")
+        
+        col = box.column(align=True)
+        r = col.row()
+        r.prop(mat, "ls3d_env_overlay")
+        r.prop(mat, "ls3d_env_multiply")
+        r.prop(mat, "ls3d_env_additive")
+        
+        r = col.row()
+        r.prop(mat, "ls3d_env_yproj")
+        r.prop(mat, "ls3d_env_ydet")
+        r.prop(mat, "ls3d_env_zdet")
+        
+        if mat.ls3d_env_enabled:
+            box.separator()
+            box.operator("node.add_ls3d_env_setup", icon='NODETREE', text="Add Reflection Nodes")
+        
+        # C. Alpha
+        box = layout.box()
+        box.label(text="Alpha", icon='TRIA_RIGHT')
+        box.prop(mat, "ls3d_alpha_enabled")
+        
+        col = box.column(align=True)
+        r = col.row()
+        r.prop(mat, "ls3d_alpha_effect")
+        r.prop(mat, "ls3d_alpha_colorkey")
+        
+        r = col.row()
+        r.prop(mat, "ls3d_alpha_addmix")
+        r.prop(mat, "ls3d_alpha_anim")
+        
+        col.prop(mat, "ls3d_alpha_imgalpha")
+        
+        # D. Misc / Reflection Calc
+        box = layout.box()
+        box.label(text="Misc / Unknown")
+        col = box.column(align=True)
+        
+        col.prop(mat, "ls3d_disable_tex")
+        col.separator()
+        col.prop(mat, "ls3d_misc_unlit")
+        col.prop(mat, "ls3d_misc_zwrite")
+        
+        r = col.row()
+        r.prop(mat, "ls3d_misc_tile_u")
+        r.prop(mat, "ls3d_misc_tile_v")
+        
+        # Renamed properties used here (previously unk_12/13/14)
+        r = col.row()
+        r.prop(mat, "ls3d_calc_reflect_y")
+        r.prop(mat, "ls3d_proj_reflect_y")
+        r.prop(mat, "ls3d_proj_reflect_z")
+
+        # Master Node Button
+        layout.separator()
+        layout.operator("node.add_ls3d_group", icon='NODETREE', text="Add LS3D Material Data Node")
+
 class The4DSImporter:
     def __init__(self, filepath):
         self.filepath = filepath
-        dir_path = os.path.dirname(filepath)
-        self.base_dir = os.path.abspath(os.path.join(dir_path, "..", ".."))
+        self.texture_cache = {}
+        
+        # 1. Determine Paths
+        # E.g. filepath = "D:\Mafia\models\car.4ds"
+        model_dir = os.path.dirname(filepath)
+        
+        # FIX: Go back ONE level (models -> Mafia), not two
+        self.base_dir = os.path.abspath(os.path.join(model_dir, ".."))
         print(f"Base directory set to: {self.base_dir}")
-        if not os.path.exists(os.path.join(self.base_dir, "maps")):
+        
+        self.maps_dir = None
+        
+        # Helper to find folder case-insensitively
+        def find_folder(base, target_name):
+            if not os.path.exists(base): return None
+            try:
+                for name in os.listdir(base):
+                    if name.lower() == target_name.lower() and os.path.isdir(os.path.join(base, name)):
+                        return os.path.join(base, name)
+            except OSError:
+                pass
+            return None
+
+        # 1. Look for 'maps' in the parent directory (Standard Mafia structure)
+        self.maps_dir = find_folder(self.base_dir, "maps")
+        
+        # 2. Fallback: Look for 'maps' in the same directory as the model
+        if not self.maps_dir:
+            self.maps_dir = find_folder(model_dir, "maps")
+            
+        if self.maps_dir:
+            print(f"Maps directory found at: {self.maps_dir}")
+        else:
+            # Keep original warning message style
             print(f"Warning: 'maps' folder not found at {os.path.join(self.base_dir, 'maps')}. Textures may not load.")
+
         self.version = 0
         self.materials = []
         self.skinned_meshes = []
@@ -997,7 +1313,28 @@ class The4DSImporter:
         self.armature = None
         self.parenting_info = []
         self.frame_types = {}
-        self.texture_cache = {}
+
+    def get_real_file_path(self, directory, filename):
+        """Finds a file in a directory case-insensitively."""
+        if not directory or not os.path.exists(directory):
+            return None
+            
+        # Fast path: exact match
+        exact_path = os.path.join(directory, filename)
+        if os.path.exists(exact_path):
+            return exact_path
+            
+        # Slow path: iterate directory
+        filename_lower = filename.lower()
+        try:
+            for name in os.listdir(directory):
+                if name.lower() == filename_lower:
+                    return os.path.join(directory, name)
+        except OSError:
+            pass
+            
+        return None
+
     def import_file(self):
         with open(self.filepath, "rb") as f:
             header = f.read(4)
@@ -1062,16 +1399,24 @@ class The4DSImporter:
     def read_string(self, f):
         length = struct.unpack("B", f.read(1))[0]
         return self.read_string_fixed(f, length) if length > 0 else ""
-    def get_color_key(self, filepath):
+    
+    def get_color_key(self, filename):
         """
         Reads Index 0 from BMP palette (Offset 54).
         Returns linear RGB tuple.
         """
-        if not os.path.exists(filepath):
+        if not self.maps_dir:
+            return None
+            
+        # Clean filename just in case a path was passed
+        base_name = os.path.basename(filename)
+        full_path = self.get_real_file_path(self.maps_dir, base_name)
+        
+        if not full_path:
             return None
             
         try:
-            with open(filepath, "rb") as f:
+            with open(full_path, "rb") as f:
                 # BMP Header
                 if f.read(2) != b'BM': return None
                 f.seek(28) # Bit count
@@ -1091,26 +1436,35 @@ class The4DSImporter:
                         
                     return (srgb_to_lin(r), srgb_to_lin(g), srgb_to_lin(b))
         except Exception as e:
-            print(f"Error reading Color Key from {filepath}: {e}")
+            print(f"Error reading Color Key from {full_path}: {e}")
             
         return None
-    
             
-    def get_or_load_texture(self, filepath):
-        norm_path = os.path.normpath(filepath.lower())
-        if norm_path not in self.texture_cache:
-            full_path = os.path.join(self.base_dir, "maps", os.path.basename(filepath))
-            if os.path.exists(full_path):
+    def get_or_load_texture(self, filename):
+        # Normalize cache key
+        base_name = os.path.basename(filename)
+        norm_key = base_name.lower()
+        
+        if norm_key not in self.texture_cache:
+            full_path = None
+            
+            if self.maps_dir:
+                full_path = self.get_real_file_path(self.maps_dir, base_name)
+            
+            if full_path:
                 try:
                     image = bpy.data.images.load(full_path, check_existing=True)
-                    self.texture_cache[norm_path] = image
+                    self.texture_cache[norm_key] = image
                 except Exception as e:
                     print(f"Warning: Failed to load texture {full_path}: {e}")
-                    self.texture_cache[norm_path] = None
+                    self.texture_cache[norm_key] = None
             else:
-                print(f"Warning: Texture file not found: {full_path}")
-                self.texture_cache[norm_path] = None
-        return self.texture_cache[norm_path]
+                # Keep original warning style, but specific to filename
+                print(f"Warning: Texture file not found: {os.path.join(self.base_dir, 'maps', base_name)}")
+                self.texture_cache[norm_key] = None
+                
+        return self.texture_cache[norm_key]
+    
     def set_material_data(
         self, material, diffuse, alpha_tex, env_tex, emission, alpha, metallic, use_color_key
     ):
@@ -1118,15 +1472,20 @@ class The4DSImporter:
         nodes = material.node_tree.nodes
         links = material.node_tree.links
         nodes.clear()
+        
         principled = nodes.new("ShaderNodeBsdfPrincipled")
-        output = nodes.new("ShaderNodeOutputMaterial")
         principled.location = (0, 0)
-        output.location = (300, 0)
         principled.inputs["Emission Color"].default_value = (*emission, 1.0)
         principled.inputs["Metallic"].default_value = 0.0
         principled.inputs["Specular IOR Level"].default_value = 0.0
         principled.inputs["Roughness"].default_value = 1.0
+        
+        output = nodes.new("ShaderNodeOutputMaterial")
+        output.location = (300, 0)
+        
         base_color_input = principled.inputs["Base Color"]
+        
+        # Diffuse Texture
         if diffuse:
             diffuse = diffuse.lower()
             tex_image = nodes.new("ShaderNodeTexImage")
@@ -1135,50 +1494,44 @@ class The4DSImporter:
          
             if tex_image.image:
                 links.new(tex_image.outputs["Color"], principled.inputs["Base Color"])
+            
+            # Color Key (Alpha Clip)
             if use_color_key:
                 color_key = self.get_color_key(os.path.join(self.base_dir, "maps", diffuse))
                 if color_key:
                     normalized_sum = color_key[0] + color_key[1] + color_key[2]
                     threshold_value = 0.3 if diffuse == "2kolo3.bmp" else 0.015 + 0.45 * normalized_sum
+                    
                     separate_rgb = nodes.new("ShaderNodeSeparateColor")
                     separate_rgb.location = (-100, 200)
                     links.new(tex_image.outputs["Color"], separate_rgb.inputs["Color"])
-                    math_r = nodes.new("ShaderNodeMath")
-                    math_r.operation = "SUBTRACT"
-                    math_r.inputs[0].default_value = color_key[0]
+                    
+                    math_r = nodes.new("ShaderNodeMath"); math_r.operation = "SUBTRACT"; math_r.inputs[0].default_value = color_key[0]
                     links.new(separate_rgb.outputs["Red"], math_r.inputs[1])
-                    math_g = nodes.new("ShaderNodeMath")
-                    math_g.operation = "SUBTRACT"
-                    math_g.inputs[0].default_value = color_key[1]
+                    
+                    math_g = nodes.new("ShaderNodeMath"); math_g.operation = "SUBTRACT"; math_g.inputs[0].default_value = color_key[1]
                     links.new(separate_rgb.outputs["Green"], math_g.inputs[1])
-                    math_b = nodes.new("ShaderNodeMath")
-                    math_b.operation = "SUBTRACT"
-                    math_b.inputs[0].default_value = color_key[2]
+                    
+                    math_b = nodes.new("ShaderNodeMath"); math_b.operation = "SUBTRACT"; math_b.inputs[0].default_value = color_key[2]
                     links.new(separate_rgb.outputs["Blue"], math_b.inputs[1])
-                    add_rg = nodes.new("ShaderNodeMath")
-                    add_rg.operation = "ADD"
+                    
+                    add_rg = nodes.new("ShaderNodeMath"); add_rg.operation = "ADD"
                     links.new(math_r.outputs["Value"], add_rg.inputs[0])
                     links.new(math_g.outputs["Value"], add_rg.inputs[1])
-                    add_rgb = nodes.new("ShaderNodeMath")
-                    add_rgb.operation = "ADD"
+                    
+                    add_rgb = nodes.new("ShaderNodeMath"); add_rgb.operation = "ADD"
                     links.new(add_rg.outputs["Value"], add_rgb.inputs[0])
                     links.new(math_b.outputs["Value"], add_rgb.inputs[1])
-                    threshold = nodes.new("ShaderNodeMath")
-                    threshold.operation = "LESS_THAN"
+                    
+                    threshold = nodes.new("ShaderNodeMath"); threshold.operation = "GREATER_THAN" # Inverted logic for Alpha input
                     threshold.inputs[1].default_value = threshold_value
                     links.new(add_rgb.outputs["Value"], threshold.inputs[0])
-                    transparent = nodes.new("ShaderNodeBsdfTransparent")
-                    mix_shader = nodes.new("ShaderNodeMixShader")
-                    mix_shader.location = (150, 100)
-                    links.new(threshold.outputs["Value"], mix_shader.inputs["Fac"])
-                    links.new(transparent.outputs["BSDF"], mix_shader.inputs[1])
-                    links.new(principled.outputs["BSDF"], mix_shader.inputs[2])
-                    links.new(mix_shader.outputs["Shader"], output.inputs["Surface"])
+                    
+                    # Connect to Alpha directly
+                    links.new(threshold.outputs["Value"], principled.inputs["Alpha"])
                     material.blend_method = "CLIP"
-                else:
-                    links.new(principled.outputs["BSDF"], output.inputs["Surface"])
-            else:
-                links.new(principled.outputs["BSDF"], output.inputs["Surface"])
+        
+        # Alpha Texture
         if alpha_tex:
             alpha_tex = alpha_tex.lower()
             alpha_tex_image = nodes.new("ShaderNodeTexImage")
@@ -1186,8 +1539,9 @@ class The4DSImporter:
             alpha_tex_image.location = (-300, -300)
             if alpha_tex_image.image:
                 links.new(alpha_tex_image.outputs["Color"], principled.inputs["Alpha"])
-                links.new(principled.outputs["BSDF"], output.inputs["Surface"])
                 material.blend_method = "BLEND"
+        
+        # Environment Texture
         if env_tex:
             env_tex = env_tex.lower()
             env_image = nodes.new("ShaderNodeTexImage")
@@ -1212,11 +1566,14 @@ class The4DSImporter:
                     mix_rgb.inputs["Color1"].default_value = (1.0, 1.0, 1.0, 1.0)
                 links.new(env_image.outputs["Color"], mix_rgb.inputs["Color2"])
                 links.new(mix_rgb.outputs["Color"], base_color_input)
+        
         if principled.inputs["Alpha"].default_value < 1.0 or alpha_tex:
             material.blend_method = "BLEND"
+
+        # Final Link
         if not output.inputs["Surface"].is_linked:
             links.new(principled.outputs["BSDF"], output.inputs["Surface"])
-    
+               
                                                            
     def build_armature(self):
         if not self.armature or not self.joints:
@@ -1550,188 +1907,240 @@ class The4DSImporter:
         tree = mat.node_tree
         tree.nodes.clear()
 
-        # 1. READ RAW DATA
-        flags = struct.unpack("<I", f.read(4))[0]
+        # 1. READ RAW FLAGS
+        raw_flags = struct.unpack("<I", f.read(4))[0]
         
-        # Colors (Linear Float)
-        raw_amb = struct.unpack("<3f", f.read(12))
-        raw_diff = struct.unpack("<3f", f.read(12))
-        raw_emit = struct.unpack("<3f", f.read(12))
-        
+        # 2. READ VALUES
+        mat.ls3d_ambient_color = struct.unpack("<3f", f.read(12))
+        mat.ls3d_diffuse_color = struct.unpack("<3f", f.read(12))
+        mat.ls3d_emission_color = struct.unpack("<3f", f.read(12))
         opacity = struct.unpack("<f", f.read(4))[0]
+
+        # 3. PARSE FLAGS USING CONSTANTS
+        # Tiling is inverted (Flag set = Disable Tiling)
+        mat.ls3d_misc_tile_u = not bool(raw_flags & MTL_DISABLE_U_TILING)
+        mat.ls3d_misc_tile_v = not bool(raw_flags & MTL_DISABLE_V_TILING)
         
+        # Standard
+        mat.ls3d_diff_enabled = bool(raw_flags & MTL_DIFFUSETEX)
+        mat.ls3d_env_enabled = bool(raw_flags & MTL_ENVMAP)
+        mat.ls3d_diff_mipmap = bool(raw_flags & MTL_MIPMAP)
+        mat.ls3d_alpha_imgalpha = bool(raw_flags & MTL_ALPHA_IN_TEX)
+        mat.ls3d_alpha_anim = bool(raw_flags & MTL_ANIMATED_ALPHA)
+        mat.ls3d_diff_anim = bool(raw_flags & MTL_ANIMATED_DIFFUSE)
+        mat.ls3d_diff_colored = bool(raw_flags & MTL_COLORED)
+        mat.ls3d_diff_2sided = bool(raw_flags & MTL_DOUBLESIDED)
+        mat.ls3d_alpha_colorkey = bool(raw_flags & MTL_COLORKEY)
+        mat.ls3d_alpha_enabled = bool(raw_flags & MTL_ALPHA)
+        mat.ls3d_alpha_addmix = bool(raw_flags & MTL_ADDITIVE)
+        
+        # Reflection / Advanced
+        mat.ls3d_calc_reflect_y = bool(raw_flags & MTL_CALCREFLECTTEXY)
+        mat.ls3d_proj_reflect_y = bool(raw_flags & MTL_PROJECTREFLECTTEXY)
+        mat.ls3d_proj_reflect_z = bool(raw_flags & MTL_PROJECTREFLECTTEXZ)
+
+        # Environment
+        mat.ls3d_env_overlay = bool(raw_flags & MTL_ENV_OVERLAY)
+        mat.ls3d_env_multiply = bool(raw_flags & MTL_ENV_MULTIPLY)
+        mat.ls3d_env_additive = bool(raw_flags & MTL_ENV_ADDITIVE)
+        mat.ls3d_disable_tex = bool(raw_flags & MTL_ENV_DISABLE_TEX)
+        mat.ls3d_env_yproj = bool(raw_flags & MTL_ENV_PROJECT_Y)
+        mat.ls3d_env_ydet = bool(raw_flags & MTL_ENV_DETERMINED_Y)
+        mat.ls3d_env_zdet = bool(raw_flags & MTL_ENV_DETERMINED_Z)
+        mat.ls3d_alpha_effect = bool(raw_flags & MTL_ENV_ADDEFFECT)
+
+        # Misc
+        mat.ls3d_misc_unlit = bool(raw_flags & MTL_MISC_UNLIT)
+        # Z-Write is often associated with Additive in tools, but we keep it separate
+        mat.ls3d_misc_zwrite = bool(raw_flags & MTL_ADDITIVE) 
+
+        # 4. READ TEXTURE NAMES
         env_opacity = 0.0
         env_tex_name = ""
-        
-        if flags & MTL_ENVMAP:
-            env_opacity = struct.unpack("<f", f.read(4))[0]
-            env_tex_name = self.read_string(f).lower()
-            
-        diffuse_tex_name = self.read_string(f).lower()
-        if len(diffuse_tex_name) > 0:
-            mat.name = diffuse_tex_name
-            
+        diff_tex_name = ""
         alpha_tex_name = ""
-        if (flags & MTL_ADDEFFECT) and (flags & MTL_ALPHATEX):
-            alpha_tex_name = self.read_string(f).lower()
+        
+        if mat.ls3d_env_enabled:
+            env_opacity = struct.unpack("<f", f.read(4))[0]
+            env_tex_name = self.read_string(f)
+            
+        diff_tex_name = self.read_string(f)
+        if diff_tex_name: mat.name = diff_tex_name
+        
+        if mat.ls3d_alpha_enabled:
+            alpha_tex_name = self.read_string(f)
+            
+        if mat.ls3d_diff_anim:
+            mat.ls3d_diff_frame_count = struct.unpack("<I", f.read(4))[0]
+            f.read(2) 
+            mat.ls3d_diff_frame_period = struct.unpack("<I", f.read(4))[0]
+            f.read(8)
 
-        # Skip Animation Data if present
-        if flags & MTL_ANIMTEXALPHA: f.read(14)
-        if flags & MTL_ANIMTEXDIFF: f.read(14)
-
-        # 2. SETUP NODE GROUP
+        # 5. RECONSTRUCT NODE GRAPH
         ls3d_group = get_or_create_ls3d_group()
         group_node = tree.nodes.new('ShaderNodeGroup')
         group_node.node_tree = ls3d_group
         group_node.location = (0, 0)
-        group_node.width = 280
+        group_node.width = 300
         
-        # 3. SET VALUES
-        group_node.inputs["Environment Color"].default_value = (*raw_amb, 1.0)
-        group_node.inputs["Diffuse Color"].default_value = (*raw_diff, 1.0)
-        group_node.inputs["Emission Color"].default_value = (*raw_emit, 1.0)
-        group_node.inputs["Opacity"].default_value = opacity
-        group_node.inputs["Env Intensity"].default_value = env_opacity
-        
-        # 4. SET FLAGS
-        # MTL_UNLIT is Bit 0 (0x1)
-        group_node.inputs["F: Unlit"].default_value = 1.0 if (flags & MTL_UNLIT) else 0.0 
-        group_node.inputs["F: Double Sided"].default_value = 1.0 if (flags & MTL_DOUBLESIDED) else 0.0
-        group_node.inputs["F: Colored"].default_value = 1.0 if (flags & MTL_COLORED) else 0.0
-        group_node.inputs["F: Color Key"].default_value = 1.0 if (flags & MTL_COLORKEY) else 0.0
-        group_node.inputs["F: Add Effect (Alpha)"].default_value = 1.0 if (flags & MTL_ADDEFFECT) else 0.0
-        group_node.inputs["F: Env Map"].default_value = 1.0 if (flags & MTL_ENVMAP) else 0.0
-        group_node.inputs["F: Disable Z-Write"].default_value = 1.0 if (flags & MTL_ADDITIVEMIX) else 0.0
-        group_node.inputs["F: Mip Map"].default_value = 1.0 if (flags & MTL_MIPMAP) else 0.0
+        if "Opacity" in group_node.inputs:
+            group_node.inputs["Opacity"].default_value = opacity * 100.0
 
-        # Output
         output = tree.nodes.new('ShaderNodeOutputMaterial')
         output.location = (350, 0)
         tree.links.new(group_node.outputs["BSDF"], output.inputs["Surface"])
 
-        # 5. LOAD TEXTURES
-        if diffuse_tex_name:
-            tex_node = tree.nodes.new('ShaderNodeTexImage')
-            tex_node.image = self.get_or_load_texture(diffuse_tex_name)
-            tex_node.location = (-350, 100)
-            if flags & MTL_COLORKEY:
-                tex_node.interpolation = 'Closest' 
-            tree.links.new(tex_node.outputs["Color"], group_node.inputs["Diffuse Color"])
+        if diff_tex_name:
+            tex = tree.nodes.new('ShaderNodeTexImage')
+            tex.image = self.get_or_load_texture(diff_tex_name)
+            tex.location = (-400, 200)
+            tex.label = "Diffuse Map"
+            if mat.ls3d_alpha_colorkey: tex.interpolation = 'Closest'
             
-            # Color Key Logic
-            if flags & MTL_COLORKEY:
-                mat.blend_method = 'CLIP'
-                mat.alpha_threshold = 0.5
-                full_path = os.path.join(self.base_dir, "maps", diffuse_tex_name)
-                key_color = self.get_color_key(full_path)
-                if key_color:
-                    group_node.inputs["Color Key Value"].default_value = (*key_color, 1.0)
-            
-            # Alpha Logic
-            if alpha_tex_name:
-                alpha_node = tree.nodes.new('ShaderNodeTexImage')
-                alpha_node.image = self.get_or_load_texture(alpha_tex_name)
-                alpha_node.location = (-350, -150)
-                tree.links.new(alpha_node.outputs["Color"], group_node.inputs["Opacity"])
-                mat.blend_method = 'BLEND'
-            elif (flags & MTL_ADDEFFECT) and not (flags & MTL_ALPHATEX):
-                 tree.links.new(tex_node.outputs["Alpha"], group_node.inputs["Opacity"])
-                 mat.blend_method = 'BLEND'
+            if "Diffuse Map" in group_node.inputs:
+                tree.links.new(tex.outputs["Color"], group_node.inputs["Diffuse Map"])
+            if mat.ls3d_alpha_imgalpha and "Alpha Map" in group_node.inputs:
+                tree.links.new(tex.outputs["Alpha"], group_node.inputs["Alpha Map"])
 
-        mat.use_backface_culling = not (flags & MTL_DOUBLESIDED)
+        if alpha_tex_name:
+            tex = tree.nodes.new('ShaderNodeTexImage')
+            tex.image = self.get_or_load_texture(alpha_tex_name)
+            tex.location = (-400, -100)
+            tex.label = "Alpha Map"
+            if "Alpha Map" in group_node.inputs:
+                tree.links.new(tex.outputs["Color"], group_node.inputs["Alpha Map"])
+            mat.blend_method = 'BLEND'
+
+        if env_tex_name and mat.ls3d_env_enabled:
+            frame = tree.nodes.new('NodeFrame'); frame.label = "Reflection"; frame.location = (-600, -400)
+            coord = tree.nodes.new('ShaderNodeTexCoord'); coord.location = (-1100, -400); coord.parent = frame
+            mapping = tree.nodes.new('ShaderNodeMapping'); mapping.location = (-900, -400); mapping.parent = frame
+            env_img = tree.nodes.new('ShaderNodeTexImage'); env_img.location = (-700, -400); env_img.projection = 'SPHERE'; env_img.parent = frame
+            env_img.image = self.get_or_load_texture(env_tex_name); env_img.label = "Reflection Map"
+            
+            env_grp_data = get_or_create_env_group()
+            env_group = tree.nodes.new('ShaderNodeGroup'); env_group.node_tree = env_grp_data; env_group.location = (-400, -400); env_group.parent = frame
+            
+            if "Intensity" in env_group.inputs: env_group.inputs["Intensity"].default_value = env_opacity
+            
+            tree.links.new(coord.outputs["Reflection"], mapping.inputs["Vector"])
+            tree.links.new(mapping.outputs["Vector"], env_img.inputs["Vector"])
+            tree.links.new(env_img.outputs["Color"], env_group.inputs["Color"])
+            
+            if "Reflection" in group_node.inputs:
+                tree.links.new(env_group.outputs["Output"], group_node.inputs["Reflection"])
+
+        # 6. BLENDER SETTINGS (Blender 5.0 compatible)
+        mat.use_backface_culling = not mat.ls3d_diff_2sided
+        if mat.ls3d_alpha_colorkey:
+            mat.blend_method = 'CLIP'
+            # Fallback for 5.0: If opacity is < 100%, we need BLEND to see it fade
+            if group_node.inputs["Opacity"].default_value < 100.0: mat.blend_method = 'BLEND'
+        elif mat.ls3d_alpha_addmix or mat.ls3d_alpha_enabled or mat.ls3d_alpha_imgalpha:
+            mat.blend_method = 'BLEND'
+        else:
+            mat.blend_method = 'OPAQUE'
         
         return mat
-
-    def deserialize_object(self, f, materials, mesh, mesh_data):
+    
+    def deserialize_object(self, f, materials, mesh, mesh_data, culling_flags):
         instance_id = struct.unpack("<H", f.read(2))[0]
         if instance_id > 0:
             return None, None
+            
         vertices_per_lod = []
         num_lods = struct.unpack("<B", f.read(1))[0]
         
+        base_name = mesh.name
+        
         for lod_idx in range(num_lods):
+            # 1. READ DISTANCE
+            clipping_range = struct.unpack("<f", f.read(4))[0]
+            
+            # 2. CREATE OBJECT & ASSIGN DISTANCE
             if lod_idx > 0:
-                name = f"{mesh.name}_lod{lod_idx}"
+                name = f"{base_name}_lod{lod_idx}"
                 mesh_data = bpy.data.meshes.new(name)
                 new_mesh = bpy.data.objects.new(name, mesh_data)
-                new_mesh.parent = mesh
+                new_mesh.parent = mesh 
+                new_mesh.matrix_local = Matrix.Identity(4) 
                 bpy.context.collection.objects.link(new_mesh)
-                mesh = new_mesh
-            
-            clipping_range = struct.unpack("<f", f.read(4))[0]
-            mesh.ls3d_lod_dist = clipping_range
-            
+                
+                # Assign to child LOD
+                new_mesh.ls3d_lod_dist = clipping_range
+                new_mesh.cull_flags = culling_flags
+                new_mesh.hide_set(True)
+                new_mesh.hide_render = True
+                
+                current_mesh = mesh_data
+            else:
+                # Assign to Root LOD
+                mesh.ls3d_lod_dist = clipping_range
+                current_mesh = mesh_data
+
             num_vertices = struct.unpack("<H", f.read(2))[0]
             vertices_per_lod.append(num_vertices)
             
-            bm = bmesh.new()
-            vertices = []
-            raw_verts = []
+            # --- GEOMETRY ---
+            raw_pos = []
+            raw_norm = []
+            raw_uv = []
             
             for _ in range(num_vertices):
-                pos = struct.unpack("<3f", f.read(12))
-                norm = struct.unpack("<3f", f.read(12))
-                uv = struct.unpack("<2f", f.read(8))
-                
-                vert = bm.verts.new((pos[0], pos[2], pos[1]))
-                
-                raw_verts.append({
-                    'uv': (uv[0], 1.0 - uv[1]), 
-                    'norm': (norm[0], norm[2], norm[1])
-                })
-                vertices.append(vert)
-                
+                data = struct.unpack("<3f3f2f", f.read(32))
+                raw_pos.append((data[0], data[2], data[1]))
+                raw_norm.append((data[3], data[5], data[4]))
+                raw_uv.append((data[6], 1.0 - data[7]))
+
+            bm = bmesh.new()
+            bm_verts = [bm.verts.new(p) for p in raw_pos]
             bm.verts.ensure_lookup_table()
             
             num_face_groups = struct.unpack("<B", f.read(1))[0]
+            
             for group_idx in range(num_face_groups):
                 num_faces = struct.unpack("<H", f.read(2))[0]
-                mesh_data.materials.append(None)
-                slot_idx = len(mesh_data.materials) - 1
-                for _ in range(num_faces):
-                    idxs = struct.unpack("<3H", f.read(6))
-                    idxs_swap = (idxs[0], idxs[2], idxs[1])
-                    try:
-                        face = bm.faces.new([vertices[i] for i in idxs_swap])
-                        face.material_index = slot_idx
-                        face.smooth = True # Essential to allow custom normals to render
-                    except: pass
-                        
+                raw_faces = struct.unpack(f"<{num_faces*3}H", f.read(num_faces * 6))
                 mat_idx = struct.unpack("<H", f.read(2))[0]
-                if mat_idx > 0 and mat_idx - 1 < len(materials):
-                    mesh_data.materials[slot_idx] = materials[mat_idx - 1]
-            
-            bm.to_mesh(mesh_data)
+                
+                slot_index = 0
+                if mat_idx > 0 and (mat_idx - 1) < len(materials):
+                    target_mat = materials[mat_idx - 1]
+                    if target_mat.name in current_mesh.materials:
+                        slot_index = current_mesh.materials.find(target_mat.name)
+                    else:
+                        current_mesh.materials.append(target_mat)
+                        slot_index = len(current_mesh.materials) - 1
+                
+                for i in range(0, len(raw_faces), 3):
+                    try:
+                        v1, v2, v3 = bm_verts[raw_faces[i]], bm_verts[raw_faces[i+2]], bm_verts[raw_faces[i+1]]
+                        face = bm.faces.new((v1, v2, v3))
+                        face.material_index = slot_index
+                        face.smooth = True 
+                    except ValueError: pass
+
+            bm.to_mesh(current_mesh)
             bm.free()
             
-            # --- APPLY DATA ---
-            uv_layer = mesh_data.uv_layers.new()
-            custom_normals = []
-            
-            # Iterate loops (corners) to apply UVs and Normals
-            for loop in mesh_data.loops:
-                vert_idx = loop.vertex_index
-                if uv_layer:
-                    uv_layer.data[loop.index].uv = raw_verts[vert_idx]['uv']
-                custom_normals.append(raw_verts[vert_idx]['norm'])
-            
-            # Apply Custom Normals
-            try:
-                mesh_data.normals_split_custom_set(custom_normals)
-            except AttributeError: pass 
-            
-            if hasattr(mesh_data, "use_auto_smooth"):
-                mesh_data.use_auto_smooth = True
-            
-            # Fix for Blender 5.0 validation
-            mesh_data.validate(clean_customdata=False)
-            
-            if lod_idx > 0:
-                mesh.hide_set(True)
-                mesh.hide_render = True
+            # --- NORMALS & UVS ---
+            if num_vertices > 0:
+                uv_layer = current_mesh.uv_layers.new(name="UVMap")
+                loop_normals = []
+                for loop in current_mesh.loops:
+                    v_idx = loop.vertex_index
+                    uv_layer.data[loop.index].uv = raw_uv[v_idx]
+                    loop_normals.append(raw_norm[v_idx])
+                
+                try: current_mesh.normals_split_custom_set(loop_normals)
+                except: pass
+
+                if hasattr(current_mesh, "use_auto_smooth"):
+                    current_mesh.use_auto_smooth = True
+                current_mesh.validate(clean_customdata=False)
             
         return num_lods, vertices_per_lod
-                    
+    
     def deserialize_sector(self, f, mesh):
         # 1. Flags
         flags = struct.unpack("<2I", f.read(8))
@@ -1809,24 +2218,19 @@ class The4DSImporter:
         bm.free()
 
     def deserialize_frame(self, f, materials, frames):
-        # 1. READ HEADER
         frame_type = struct.unpack("<B", f.read(1))[0]
         visual_type = 0
-        visual_flags = (128, 42) # Default (RenderFlag1, RenderFlag2)
+        visual_flags = (128, 42) 
         
         if frame_type == FRAME_VISUAL:
             visual_type = struct.unpack("<B", f.read(1))[0]
-            # Read 2 Bytes: Render Flags 1 and Render Flags 2
             visual_flags = struct.unpack("<2B", f.read(2))
             
         parent_id = struct.unpack("<H", f.read(2))[0]
-     
-        # 2. READ TRANSFORM
         position = struct.unpack("<3f", f.read(12))
         scale = struct.unpack("<3f", f.read(12))
-        rot = struct.unpack("<4f", f.read(16)) # Quaternion (W, X, Y, Z)
+        rot = struct.unpack("<4f", f.read(16)) 
         
-        # Convert to Blender Coordinate System (Z-Up)
         pos = (position[0], position[2], position[1])
         scl = (scale[0], scale[2], scale[1])
         rot_tuple = (rot[0], rot[1], rot[3], rot[2])
@@ -1836,12 +2240,11 @@ class The4DSImporter:
         trans_mat = Matrix.Translation(pos)
         transform_mat = trans_mat @ rot_mat @ scale_mat
         
-        # 3. READ CULL FLAGS & STRINGS
-        culling_flags = struct.unpack("<B", f.read(1))[0]
+        # Read Flag and convert to int just to be safe
+        culling_flags = int(struct.unpack("<B", f.read(1))[0])
         name = self.read_string(f)
         user_props = self.read_string(f)
         
-        # Register Frame ID
         self.frame_types[self.frame_index] = frame_type
         if parent_id > 0:
             self.parenting_info.append((self.frame_index, parent_id))
@@ -1849,10 +2252,7 @@ class The4DSImporter:
         mesh = None
         empty = None
         
-        # --- 4. CREATE OBJECTS BASED ON TYPE ---
-        
         if frame_type == FRAME_VISUAL:
-            # A. Standard / Lit Objects
             if visual_type in (VISUAL_OBJECT, VISUAL_LITOBJECT):
                 mesh_data = bpy.data.meshes.new(name + "_mesh")
                 mesh = bpy.data.objects.new(name, mesh_data)
@@ -1862,39 +2262,35 @@ class The4DSImporter:
                 self.frames_map[self.frame_index] = mesh
                 self.frame_index += 1
                 mesh.matrix_local = transform_mat
-                self.deserialize_object(f, materials, mesh, mesh_data)
+                
+                mesh.cull_flags = culling_flags
+                self.deserialize_object(f, materials, mesh, mesh_data, culling_flags)
             
-            # B. Billboard
             elif visual_type == VISUAL_BILLBOARD:
                 mesh_data = bpy.data.meshes.new(name + "_mesh")
                 mesh = bpy.data.objects.new(name, mesh_data)
                 bpy.context.collection.objects.link(mesh)
-                mesh.visual_type = '4' # Billboard
+                mesh.visual_type = '4'
                 frames.append(mesh)
                 self.frames_map[self.frame_index] = mesh
                 self.frame_index += 1
                 mesh.matrix_local = transform_mat
                 
-                # Read Mesh Data
-                self.deserialize_object(f, materials, mesh, mesh_data)
-                # Read Specific Billboard Props
+                mesh.cull_flags = culling_flags
+                self.deserialize_object(f, materials, mesh, mesh_data, culling_flags)
                 self.deserialize_billboard(f, mesh)
 
-            # C. Mirror
             elif visual_type == VISUAL_MIRROR:
                 mesh_data = bpy.data.meshes.new(name + "_mesh")
                 mesh = bpy.data.objects.new(name, mesh_data)
                 bpy.context.collection.objects.link(mesh)
-                mesh.visual_type = '8' # Mirror
+                mesh.visual_type = '8'
                 frames.append(mesh)
                 self.frames_map[self.frame_index] = mesh
                 self.frame_index += 1
                 mesh.matrix_local = transform_mat
-                
-                # Mirror has its own geometry structure
                 self.deserialize_mirror(f, mesh)
 
-            # D. Skinned / Morph Objects
             elif visual_type in (VISUAL_SINGLEMESH, VISUAL_SINGLEMORPH, VISUAL_MORPH):
                 mesh_data = bpy.data.meshes.new(name + "_mesh")
                 mesh = bpy.data.objects.new(name, mesh_data)
@@ -1904,21 +2300,18 @@ class The4DSImporter:
                 self.frames_map[self.frame_index] = mesh
                 mesh.matrix_local = transform_mat
                 
-                # Read Geometry
-                num_lods, verts_per_lod = self.deserialize_object(f, materials, mesh, mesh_data)
+                mesh.cull_flags = culling_flags
+                num_lods, verts_per_lod = self.deserialize_object(f, materials, mesh, mesh_data, culling_flags)
                 
-                # Read Skinning Data
                 if visual_type != VISUAL_MORPH:
                     self.deserialize_singlemesh(f, num_lods, mesh)
                     self.bones_map[self.frame_index] = self.base_bone_name
                 
-                # Read Morph Data
                 if visual_type != VISUAL_SINGLEMESH:
                     self.deserialize_morph(f, mesh, verts_per_lod)
                 
                 self.frame_index += 1
             
-            # E. Fallback for others (Projector, Emitor, etc) to keep stream sync
             else:
                 mesh_data = bpy.data.meshes.new(name + "_mesh")
                 mesh = bpy.data.objects.new(name, mesh_data)
@@ -1929,7 +2322,8 @@ class The4DSImporter:
                 self.frame_index += 1
                 mesh.matrix_local = transform_mat
                 try: 
-                    self.deserialize_object(f, materials, mesh, mesh_data)
+                    mesh.cull_flags = culling_flags
+                    self.deserialize_object(f, materials, mesh, mesh_data, culling_flags)
                 except: 
                     print(f"Warning: Could not parse geometry for visual type {visual_type}")
 
@@ -1969,7 +2363,7 @@ class The4DSImporter:
             self.deserialize_occluder(f, mesh, pos, rot_tuple, scl)
             
         elif frame_type == FRAME_JOINT:
-            _ = f.read(64) # Skip Matrix
+            _ = f.read(64) 
             bone_id = struct.unpack("<I", f.read(4))[0]
             if self.armature:
                 self.joints.append((name, transform_mat, parent_id, bone_id))
@@ -1978,25 +2372,15 @@ class The4DSImporter:
                 self.frames_map[self.frame_index] = name
                 self.frame_index += 1
         
-        else:
-            print(f"Unsupported frame type {frame_type} for '{name}'")
-            return False
-        
-        # --- 5. APPLY FLAGS & PROPERTIES TO OBJECT ---
         target_obj = mesh if mesh else empty
         if target_obj:
-            # Apply Cull Flags
             target_obj.cull_flags = culling_flags
-            
-            # Apply User Props (String)
             target_obj.ls3d_user_props = user_props
-            # Legacy support
             target_obj["Frame Properties"] = user_props 
             
-            # Apply Visual Flags (Render Flags)
             if frame_type == FRAME_VISUAL:
-                target_obj.render_flags = visual_flags[0]  # Render Flag 1
-                target_obj.render_flags2 = visual_flags[1] # Render Flag 2
+                target_obj.render_flags = visual_flags[0]
+                target_obj.render_flags2 = visual_flags[1]
                 
         return True
     
@@ -2069,14 +2453,20 @@ class Import4DS(bpy.types.Operator, ImportHelper):
         return {"FINISHED"}
 def menu_func_import(self, context):
     self.layout.operator(Import4DS.bl_idname, text="4DS Model File (.4ds)")
+
 def menu_func_export(self, context):
     self.layout.operator(Export4DS.bl_idname, text="4DS Model File (.4ds)")
 
-# --- HELPER FUNCTIONS ---
+# --- PROPERTY HELPER FUNCTIONS ---
+# These must exist before register() is called
+
 def get_flag_bit(self, prop_name, bit_index):
-    return (getattr(self, prop_name, 0) & (1 << bit_index)) != 0
+    """Returns True if the specific bit is set in the integer property."""
+    value = getattr(self, prop_name, 0)
+    return (value & (1 << bit_index)) != 0
 
 def set_flag_bit(self, value, prop_name, bit_index):
+    """Sets or clears a specific bit in the integer property."""
     current = getattr(self, prop_name, 0)
     if value:
         setattr(self, prop_name, current | (1 << bit_index))
@@ -2089,113 +2479,231 @@ def make_getter(prop_name, bit_index):
 def make_setter(prop_name, bit_index):
     return lambda self, value: set_flag_bit(self, value, prop_name, bit_index)
 
-def register():
-    # 1. Visual Type
-    bpy.types.Object.visual_type = EnumProperty(
-        name="Mesh Type",
-        items=(
-            ('0', "Object", "Standard static mesh"),
-            ('1', "Lit Object", "Object with pre-calculated lighting"),
-            ('2', "Single Mesh", "Mesh with armature"),
-            ('3', "Single Morph", "Mesh with armature and morphs"),
-            ('4', "Billboard", "Always faces camera"),
-            ('5', "Morph", "Morph targets only"),
-            ('6', "Lens", "Lens flare"),
-            ('7', "Projector", "Light projector"),
-            ('8', "Mirror", "Reflection surface"),
-            ('9', "Emitor", "Particle emitter"),
-            ('10', "Shadow", "Shadow volume"),
-            ('11', "Land Patch", "Landscape"),
-        ),
-        default='0'
-    )
-
-    # 2. Raw Flags (Integers)
-    bpy.types.Object.cull_flags = IntProperty(name="Cull Flags", default=128, min=0, max=255, description="Raw value")
-    bpy.types.Object.render_flags = IntProperty(name="Render Flags 1", default=128, min=0, max=255, description="Raw value")
-    bpy.types.Object.render_flags2 = IntProperty(name="Render Flags 2", default=42, min=0, max=255, description="Raw value")
-
-    # 3. Render Flags 2 Checkboxes (Matches Max4ds rltObject)
-    bpy.types.Object.rf2_depth_bias = BoolProperty(name="Depth Bias", get=make_getter("render_flags2", 0), set=make_setter("render_flags2", 0))
-    bpy.types.Object.rf2_shadowed = BoolProperty(name="Shadowed", get=make_getter("render_flags2", 1), set=make_setter("render_flags2", 1))
-    bpy.types.Object.rf2_tex_proj = BoolProperty(name="Tex. Proj.", get=make_getter("render_flags2", 5), set=make_setter("render_flags2", 5))
-    bpy.types.Object.rf2_no_fog = BoolProperty(name="No Fog", get=make_getter("render_flags2", 7), set=make_setter("render_flags2", 7))
-
-    # 4. Cull Flags Checkboxes (Matches Max4ds rltObject)
-    bpy.types.Object.cf_enabled = BoolProperty(name="(1) Enabled", get=make_getter("cull_flags", 0), set=make_setter("cull_flags", 0))
-    for i in range(1, 8):
-        setattr(bpy.types.Object, f"cf_unknown{i+1}", BoolProperty(name=f"({i+1}) Unknown", get=make_getter("cull_flags", i), set=make_setter("cull_flags", i)))
-
-    # 5. String Params & LOD
-    bpy.types.Object.ls3d_user_props = StringProperty(name="String Params", description="User defined property string")
-    bpy.types.Object.ls3d_lod_dist = FloatProperty(name="Fadeout Distance", default=100.0, min=0.0)
-
-    # 6. Portal Parameters
-    bpy.types.Object.ls3d_portal_flags = IntProperty(name="Flags", default=4)
-    bpy.types.Object.ls3d_portal_near = FloatProperty(name="Near Range", default=0.0)
-    bpy.types.Object.ls3d_portal_far = FloatProperty(name="Far Range", default=100.0)
-    bpy.types.Object.ls3d_portal_unknown = FloatProperty(name="Unknown", default=0.0)
-    # Portal Enable (Bit 2 = Value 4)
-    bpy.types.Object.ls3d_portal_enabled = BoolProperty(name="Enabled", get=make_getter("ls3d_portal_flags", 2), set=make_setter("ls3d_portal_flags", 2))
-
-    # 7. Billboard & Mirror
-    # Max: X, Z, Y -> 4DS: 0, 1, 2
-    bpy.types.Object.rot_axis = EnumProperty(name="Rotation Axis", items=(('0', "X", ""), ('1', "Z", ""), ('2', "Y", "")), default='1')
-    bpy.types.Object.rot_mode = EnumProperty(name="Rotation Mode", items=(('0', "All Axes", ""), ('1', "Single Axis", "")), default='0')
-    
-    bpy.types.Object.mirror_color = FloatVectorProperty(name="Background Color", subtype='COLOR', default=(0.0, 0.0, 0.0))
-    bpy.types.Object.mirror_dist = FloatProperty(name="Active Range", default=100.0)
-
-    # 8. Sector Flags
-    bpy.types.Object.ls3d_sector_flags1 = IntProperty(name="Flags 1", default=2049)
-    bpy.types.Object.ls3d_sector_flags2 = IntProperty(name="Flags 2", default=0)
-
-    # BBox Storage
-    bpy.types.Object.bbox_min = FloatVectorProperty(name="BBox Min", subtype='XYZ')
-    bpy.types.Object.bbox_max = FloatVectorProperty(name="BBox Max", subtype='XYZ')
-    
-    bpy.utils.register_class(LS3D_OT_AddNode)
-    bpy.utils.register_class(The4DSPanel)
-    bpy.utils.register_class(Import4DS)
-    bpy.utils.register_class(Export4DS)
-    bpy.types.TOPBAR_MT_file_import.append(menu_func_import)
-    bpy.types.TOPBAR_MT_file_export.append(menu_func_export)
+# --- REGISTRATION ---
 
 def unregister():
+    # 1. Clean up Menu Entries
+    try:
+        bpy.types.TOPBAR_MT_file_import.remove(menu_func_import)
+        bpy.types.TOPBAR_MT_file_export.remove(menu_func_export)
+    except: pass
+
+    # 2. Clean up Properties
+    # (Delete all the ls3d_... properties here)
+    del bpy.types.Material.ls3d_diffuse_color
+    del bpy.types.Material.ls3d_ambient_color
+    del bpy.types.Material.ls3d_emission_color
+    del bpy.types.Material.ls3d_diff_enabled
+    del bpy.types.Material.ls3d_diff_colored
+    del bpy.types.Material.ls3d_diff_anim
+    del bpy.types.Material.ls3d_diff_frame_count
+    del bpy.types.Material.ls3d_diff_frame_period
+    del bpy.types.Material.ls3d_diff_mipmap
+    del bpy.types.Material.ls3d_diff_2sided
+    del bpy.types.Material.ls3d_env_enabled
+    del bpy.types.Material.ls3d_env_overlay
+    del bpy.types.Material.ls3d_env_multiply
+    del bpy.types.Material.ls3d_env_additive
+    del bpy.types.Material.ls3d_env_yproj
+    del bpy.types.Material.ls3d_env_ydet
+    del bpy.types.Material.ls3d_env_zdet
+    del bpy.types.Material.ls3d_alpha_enabled
+    del bpy.types.Material.ls3d_alpha_effect
+    del bpy.types.Material.ls3d_alpha_colorkey
+    del bpy.types.Material.ls3d_alpha_addmix
+    del bpy.types.Material.ls3d_alpha_anim
+    del bpy.types.Material.ls3d_alpha_imgalpha
+    del bpy.types.Material.ls3d_disable_tex
+    
+    # Delete new ones
+    del bpy.types.Material.ls3d_calc_reflect_y
+    del bpy.types.Material.ls3d_proj_reflect_y
+    del bpy.types.Material.ls3d_proj_reflect_z
+    
+    del bpy.types.Material.ls3d_misc_unlit
+    del bpy.types.Material.ls3d_misc_tile_u
+    del bpy.types.Material.ls3d_misc_tile_v
+    del bpy.types.Material.ls3d_misc_zwrite
+
+    # ... Delete Object properties (cull_flags, etc) ... 
     del bpy.types.Object.visual_type
     del bpy.types.Object.cull_flags
     del bpy.types.Object.render_flags
     del bpy.types.Object.render_flags2
-    del bpy.types.Object.rf2_depth_bias
-    del bpy.types.Object.rf2_shadowed
-    del bpy.types.Object.rf2_tex_proj
-    del bpy.types.Object.rf2_no_fog
-    del bpy.types.Object.cf_enabled
-    for i in range(1, 8):
-        try: delattr(bpy.types.Object, f"cf_unknown{i+1}")
-        except: pass
-    
+    del bpy.types.Object.rf1_cast_shadow
+    del bpy.types.Object.rf1_receive_shadow
+    del bpy.types.Object.rf1_draw_last
+    del bpy.types.Object.rf1_zbias
+    del bpy.types.Object.rf1_active
+    del bpy.types.Object.rf2_decal
+    del bpy.types.Object.rf2_stencil
+    del bpy.types.Object.rf2_mirror
+    del bpy.types.Object.rf2_proj
+    del bpy.types.Object.rf2_nofog
+    del bpy.types.Object.cf_visible
+    del bpy.types.Object.cf_coll_player
+    del bpy.types.Object.cf_coll_ai
+    del bpy.types.Object.cf_coll_vehicle
+    del bpy.types.Object.cf_coll_camera
+    del bpy.types.Object.cf_coll_proj
+    del bpy.types.Object.cf_coll_item
+    del bpy.types.Object.cf_light_int
     del bpy.types.Object.ls3d_user_props
     del bpy.types.Object.ls3d_lod_dist
-    del bpy.types.Object.ls3d_sector_flags1
-    del bpy.types.Object.ls3d_sector_flags2
     del bpy.types.Object.ls3d_portal_flags
     del bpy.types.Object.ls3d_portal_near
     del bpy.types.Object.ls3d_portal_far
     del bpy.types.Object.ls3d_portal_unknown
     del bpy.types.Object.ls3d_portal_enabled
+    del bpy.types.Object.ls3d_sector_flags1
+    del bpy.types.Object.ls3d_sector_flags2
     del bpy.types.Object.rot_axis
     del bpy.types.Object.rot_mode
     del bpy.types.Object.mirror_color
     del bpy.types.Object.mirror_dist
     del bpy.types.Object.bbox_min
     del bpy.types.Object.bbox_max
-    
+
+    # 3. Unregister Classes
+    bpy.utils.unregister_class(LS3D_OT_AddEnvSetup)
     bpy.utils.unregister_class(LS3D_OT_AddNode)
+    bpy.utils.unregister_class(The4DSPanelMaterial)
     bpy.utils.unregister_class(The4DSPanel)
     bpy.utils.unregister_class(Import4DS)
     bpy.utils.unregister_class(Export4DS)
-    bpy.types.TOPBAR_MT_file_import.remove(menu_func_import)
-    bpy.types.TOPBAR_MT_file_export.remove(menu_func_export)
+
+
+def register():
+    # --- HELPER / ENUMS ---
+    bpy.types.Object.visual_type = EnumProperty(
+        name="Mesh Type",
+        items=(
+            ('0', "Object", "Standard static mesh"), 
+            ('1', "Lit Object", "Static object with pre-calc lighting"), 
+            ('2', "Single Mesh", "Optimized single-buffer mesh"), 
+            ('3', "Single Morph", "Single mesh with morphs"), 
+            ('4', "Billboard", "Sprite rotating to camera"), 
+            ('5', "Morph", "Standard mesh with morphs"), 
+            ('6', "Lens", "Lens flare"), 
+            ('7', "Projector", "Texture projector"), 
+            ('8', "Mirror", "Reflection surface"), 
+            ('9', "Emitor", "Particle emitter"), 
+            ('10', "Shadow", "Shadow volume mesh"), 
+            ('11', "Land Patch", "Terrain geometry")
+        ),
+        default='0'
+    )
+    
+    # --- RAW INTEGER STORAGE ---
+    bpy.types.Object.cull_flags = IntProperty(name="Culling & Collision Flags", default=1, min=0, max=255, description="Collision and Visibility bitmask") # Cull Flags
+    bpy.types.Object.render_flags = IntProperty(name="Render Flags Primary", default=128, min=0, max=255, description="Visual rendering properties") # Render Flags 1
+    bpy.types.Object.render_flags2 = IntProperty(name="Render Flags Secondary", default=8, min=0, max=255, description="Logical rendering properties") # Render Flags 2
+    
+    # --- RENDER FLAGS 1 (Visual) ---
+    bpy.types.Object.rf1_cast_shadow = BoolProperty(name="Casts Shadow", get=make_getter("render_flags", 0), set=make_setter("render_flags", 0), description="Object casts a shadow")
+    bpy.types.Object.rf1_receive_shadow = BoolProperty(name="Receives Shadow", get=make_getter("render_flags", 1), set=make_setter("render_flags", 1), description="Object receives shadows")
+    bpy.types.Object.rf1_draw_last = BoolProperty(name="Draw Last (Alpha)", get=make_getter("render_flags", 2), set=make_setter("render_flags", 2), description="Forces the object to render after opaque objects. Required for transparent objects")
+    bpy.types.Object.rf1_zbias = BoolProperty(name="Z-Bias (Overlay)", get=make_getter("render_flags", 3), set=make_setter("render_flags", 3), description="Disables Z-Buffer depth check (Always on top, prevents Z-Fighting of two coplanar surfaces)")
+    bpy.types.Object.rf1_active = BoolProperty(name="Active", get=make_getter("render_flags", 7), set=make_setter("render_flags", 7), description="Renderer sees and renders the object normally")
+
+    # --- RENDER FLAGS 2 (Logic) ---
+    bpy.types.Object.rf2_decal = BoolProperty(name="Is Decal", get=make_getter("render_flags2", 0), set=make_setter("render_flags2", 0), description="Draws coplanar on top of other mesh")
+    bpy.types.Object.rf2_stencil = BoolProperty(name="Shadow Volume", get=make_getter("render_flags2", 1), set=make_setter("render_flags2", 1), description="Object is a stencil shadow object/volume")
+    bpy.types.Object.rf2_mirror = BoolProperty(name="Mirrorable", get=make_getter("render_flags2", 2), set=make_setter("render_flags2", 2), description="Visible in mirrors")
+    bpy.types.Object.rf2_proj = BoolProperty(name="Recieves Projection", get=make_getter("render_flags2", 5), set=make_setter("render_flags2", 5), description="Receives projected textures (headlights)")
+    bpy.types.Object.rf2_nofog = BoolProperty(name="No Fog", get=make_getter("render_flags2", 7), set=make_setter("render_flags2", 7), description="Disables fog shading for this object")
+
+    # --- CULL FLAGS (Collision/Visibility) ---
+    bpy.types.Object.cf_visible = BoolProperty(name="Visible", get=make_getter("cull_flags", 0), set=make_setter("cull_flags", 0), description="Global object culling (Can be toggled with scripts)")
+    bpy.types.Object.cf_coll_player = BoolProperty(name="Player", get=make_getter("cull_flags", 1), set=make_setter("cull_flags", 1), description="Collision with Player/Humans")
+    bpy.types.Object.cf_coll_ai = BoolProperty(name="AI/Bullet", get=make_getter("cull_flags", 2), set=make_setter("cull_flags", 2), description="Collision with AI and Bullets (Small)")
+    bpy.types.Object.cf_coll_vehicle = BoolProperty(name="Vehicle", get=make_getter("cull_flags", 3), set=make_setter("cull_flags", 3), description="Collision with Vehicles")
+    bpy.types.Object.cf_coll_camera = BoolProperty(name="Camera", get=make_getter("cull_flags", 4), set=make_setter("cull_flags", 4), description="Collision with Camera")
+    bpy.types.Object.cf_coll_proj = BoolProperty(name="Projectile", get=make_getter("cull_flags", 5), set=make_setter("cull_flags", 5), description="Collision with Rockets/Grenades")
+    bpy.types.Object.cf_coll_item = BoolProperty(name="Item/Move", get=make_getter("cull_flags", 6), set=make_setter("cull_flags", 6), description="Collision with Movable items")
+    bpy.types.Object.cf_light_int = BoolProperty(name="Light Interact", get=make_getter("cull_flags", 7), set=make_setter("cull_flags", 7), description="Interacts with scene lighting")
+
+    # --- OTHER PARAMS ---
+    bpy.types.Object.ls3d_user_props = StringProperty(name="String Parameters", description="Frame properties")
+    bpy.types.Object.ls3d_lod_dist = FloatProperty(name="Fade-in Distance", default=100.0, description="Distance at which this LOD becomes visible")
+    
+    # Portal/Sector
+    bpy.types.Object.ls3d_portal_flags = IntProperty(name="Flags", default=4)
+    bpy.types.Object.ls3d_portal_near = FloatProperty(name="Near Range", default=0.0)
+    bpy.types.Object.ls3d_portal_far = FloatProperty(name="Far Range", default=100.0)
+    bpy.types.Object.ls3d_portal_unknown = FloatProperty(name="Unknown", default=0.0)
+    bpy.types.Object.ls3d_portal_enabled = BoolProperty(name="Enabled", get=make_getter("ls3d_portal_flags", 2), set=make_setter("ls3d_portal_flags", 2))
+    
+    bpy.types.Object.ls3d_sector_flags1 = IntProperty(default=2049, name="Sector Flags 1")
+    bpy.types.Object.ls3d_sector_flags2 = IntProperty(default=0, name="Sector Flags 2")
+    
+    # Specifics
+    bpy.types.Object.rot_axis = EnumProperty(name="Rotation Axis", items=(('0', "X", ""), ('1', "Z", ""), ('2', "Y", "")), default='1')
+    bpy.types.Object.rot_mode = EnumProperty(name="Rotation Mode", items=(('0', "All Axes", ""), ('1', "Single Axis", "")), default='0')
+    bpy.types.Object.mirror_color = FloatVectorProperty(subtype='COLOR', default=(0,0,0), name="Mirror Color", description="Tint color of the Mirror")
+    bpy.types.Object.mirror_dist = FloatProperty(default=100.0, name="Mirror Distance", description="Distance of how far the Mirror will mirror objects")
+    bpy.types.Object.bbox_min = FloatVectorProperty(subtype='XYZ')
+    bpy.types.Object.bbox_max = FloatVectorProperty(subtype='XYZ')
+
+    # --- MATERIAL PROPS ---
+    
+    # 1. Colors
+    bpy.types.Material.ls3d_diffuse_color = FloatVectorProperty(subtype='COLOR', default=(1,1,1), name="Diffuse Color", description="Main surface color")
+    bpy.types.Material.ls3d_ambient_color = FloatVectorProperty(subtype='COLOR', default=(0.5,0.5,0.5), name="Ambient Color", description="Environment/Shadow color influence")
+    bpy.types.Material.ls3d_emission_color = FloatVectorProperty(subtype='COLOR', default=(0,0,0), name="Emission Color", description="Self-illumination color")
+    
+    # 2. Diffuse Flags
+    bpy.types.Material.ls3d_diff_enabled = BoolProperty(default=True, name="Diffuse Enabled", description="Enable diffuse texturing (MTL_DIFFUSETEX)")
+    bpy.types.Material.ls3d_diff_colored = BoolProperty(name="Use Vertex Colors", description="Blend vertex colors with texture (MTL_COLORED)")
+    bpy.types.Material.ls3d_diff_anim = BoolProperty(name="Animated Texture", description="Enable texture animation (MTL_ANIMATED_DIFFUSE)")
+    bpy.types.Material.ls3d_diff_frame_count = IntProperty(default=0, name="Frame Count")
+    bpy.types.Material.ls3d_diff_frame_period = IntProperty(default=0, name="Frame Period (ms)")
+    bpy.types.Material.ls3d_diff_mipmap = BoolProperty(default=True, name="Use MipMaps", description="Enable mipmapping (MTL_MIPMAP)")
+    bpy.types.Material.ls3d_diff_2sided = BoolProperty(name="Double Sided", description="Render both sides of faces (MTL_DOUBLESIDED)")
+    
+    # 3. Environment Flags
+    bpy.types.Material.ls3d_env_enabled = BoolProperty(name="Environment Map", description="Enable environmental reflection (MTL_ENVMAP)")
+    bpy.types.Material.ls3d_env_overlay = BoolProperty(name="Env Overlay", description="Overlay environment on diffuse (MTL_ENV_OVERLAY)")
+    bpy.types.Material.ls3d_env_multiply = BoolProperty(default=True, name="Env Multiply", description="Multiply environment with diffuse (MTL_ENV_MULTIPLY)")
+    bpy.types.Material.ls3d_env_additive = BoolProperty(name="Env Additive", description="Add environment to diffuse (MTL_ENV_ADDITIVE)")
+    bpy.types.Material.ls3d_env_yproj = BoolProperty(name="Env Y-Proj", description="Y-Axis Projection (MTL_ENV_PROJECT_Y)")
+    bpy.types.Material.ls3d_env_ydet = BoolProperty(name="Env Y-Det", description="Y-Determined mapping (MTL_ENV_DETERMINED_Y)")
+    bpy.types.Material.ls3d_env_zdet = BoolProperty(name="Env Z-Det", description="Z-Determined mapping (MTL_ENV_DETERMINED_Z)")
+    
+    # 4. Alpha Flags
+    bpy.types.Material.ls3d_alpha_enabled = BoolProperty(name="Alpha Map", description="Enable alpha mask texture")
+    bpy.types.Material.ls3d_alpha_effect = BoolProperty(name="Alpha Effect", description="Special alpha effect mode (MTL_ENV_ADDEFFECT)")
+    bpy.types.Material.ls3d_alpha_colorkey = BoolProperty(name="Color Key", description="Hard cutout transparency. Color key is the first indexed value in BMP color table")
+    bpy.types.Material.ls3d_alpha_addmix = BoolProperty(name="Additive Mix", description="Additive blending (MTL_ADDITIVE)")
+    bpy.types.Material.ls3d_alpha_anim = BoolProperty(name="Animated Alpha", description="Animated alpha texture (MTL_ANIMATED_ALPHA)")
+    bpy.types.Material.ls3d_alpha_imgalpha = BoolProperty(name="Use Image Alpha", description="Use alpha channel embedded in the diffuse texture (MTL_ALPHA_IN_TEX)")
+    
+    # 5. Misc & Reflection Calc
+    bpy.types.Material.ls3d_disable_tex = BoolProperty(name="Disable Texture", description="Force disable texturing (MTL_ENV_DISABLE_TEX)")
+    
+    bpy.types.Material.ls3d_calc_reflect_y = BoolProperty(name="Calc Reflect Y (Wet)", description="Calculate Reflection Y. Used for Wet Roads (MTL_CALCREFLECTTEXY)")
+    bpy.types.Material.ls3d_proj_reflect_y = BoolProperty(name="Proj Reflect Y", description="Project Reflection Y (MTL_PROJECTREFLECTTEXY)")
+    bpy.types.Material.ls3d_proj_reflect_z = BoolProperty(name="Proj Reflect Z", description="Project Reflection Z (MTL_PROJECTREFLECTTEXZ)")
+    
+    bpy.types.Material.ls3d_misc_unlit = BoolProperty(name="Unlit", description="Disable lighting (FullBright) (MTL_MISC_UNLIT)")
+    bpy.types.Material.ls3d_misc_tile_u = BoolProperty(default=True, name="Tile U", description="Repeat texture horizontally")
+    bpy.types.Material.ls3d_misc_tile_v = BoolProperty(default=True, name="Tile V", description="Repeat texture vertically")
+    bpy.types.Material.ls3d_misc_zwrite = BoolProperty(name="Z-Write", description="Write to Z-Buffer")
+
+    # Classes
+    bpy.utils.register_class(LS3D_OT_AddEnvSetup)
+    bpy.utils.register_class(LS3D_OT_AddNode)
+    bpy.utils.register_class(The4DSPanelMaterial)
+    bpy.utils.register_class(The4DSPanel)
+    bpy.utils.register_class(Import4DS)
+    bpy.utils.register_class(Export4DS)
+    
+    try:
+        bpy.types.TOPBAR_MT_file_import.remove(menu_func_import)
+        bpy.types.TOPBAR_MT_file_export.remove(menu_func_export)
+    except: pass
+    bpy.types.TOPBAR_MT_file_import.append(menu_func_import)
+    bpy.types.TOPBAR_MT_file_export.append(menu_func_export)
+    
 if __name__ == "__main__":
     register()
